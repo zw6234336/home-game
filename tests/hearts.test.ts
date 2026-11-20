@@ -91,7 +91,7 @@ test('HeartCatchField keeps basket width proportional to shoulder width rather t
   assert.ok(!caught.some(event => event.id === 'heart-1'));
 });
 
-test('HeartCatchField drops bombs that blacken the catcher face on hit and do not penalize when dodged', context => {
+test('HeartCatchField bombs transform only the catcher for active game time and dodging does not penalize', context => {
   context.mock.method(Math, 'random', () => 0.05);
   let round = hit(createRound(), 'seed-1', 30);
   const bombs: BombHitEvent[] = [];
@@ -136,10 +136,14 @@ test('HeartCatchField drops bombs that blacken the catcher face on hit and do no
   assert.equal(bombs.length, 1);
   assert.equal(round.score, 10);
   assert.equal(round.combo, 0);
-  assert.equal(live.sootAlpha(1, hitAt + 1000), 1);
-  assert.ok(live.sootAlpha(1, hitAt + 4000) > 0 && live.sootAlpha(1, hitAt + 4000) < 1);
-  assert.equal(live.sootAlpha(1, hitAt + 4600), 0);
-  assert.equal(live.sootAlpha(2, hitAt + 1000), 0);
+  assert.deepEqual(live.faceEffect(1), { kind: 'soot', alpha: 1, elapsedMs: 0 });
+  assert.equal(live.faceEffect(2), null);
+  live.clearTrails();
+  assert.equal(live.faceEffect(1)?.elapsedMs, 0);
+  live.update(4000, fit);
+  assert.ok(live.faceEffect(1)!.alpha > 0 && live.faceEffect(1)!.alpha < 1);
+  live.update(500, fit);
+  assert.equal(live.faceEffect(1), null);
 
   const landmarks = Array.from({ length: 33 }, () => ({ x: 0.5, y: 0.5, visibility: 0 }));
   landmarks[0] = { x: 0.5, y: 0.34, visibility: 1 };

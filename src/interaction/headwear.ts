@@ -83,6 +83,7 @@ export function faceAnchor(player: TrackedPlayer, fit: Rect): HeadwearPose | nul
   const eyes = leftEye && rightEye ? { center: midpoint(leftEye, rightEye), span: Math.hypot(leftEye.x - rightEye.x, leftEye.y - rightEye.y), angle: pairAngle(leftEye, rightEye) } : null;
   const ears = leftEar && rightEar ? { center: midpoint(leftEar, rightEar), span: Math.hypot(leftEar.x - rightEar.x, leftEar.y - rightEar.y), angle: pairAngle(leftEar, rightEar) } : null;
   const shoulders = leftShoulder && rightShoulder ? { center: midpoint(leftShoulder, rightShoulder), span: Math.hypot(leftShoulder.x - rightShoulder.x, leftShoulder.y - rightShoulder.y), angle: pairAngle(leftShoulder, rightShoulder) } : null;
+  if (!nose && !eyes && !ears) return null;
   const shoulderHead = shoulders && shoulders.span > 16 ? shoulders.span * 0.54 : 0;
   const earHead = ears && ears.span > 8 ? ears.span * 1.18 : 0;
   const eyeHead = eyes && eyes.span > 6 ? eyes.span * 2.5 : 0;
@@ -119,9 +120,14 @@ export function faceAnchor(player: TrackedPlayer, fit: Rect): HeadwearPose | nul
 
 export class HeadwearTracker {
   private entries = new Map<number, Smoothed>();
+  private anchor: (player: TrackedPlayer, fit: Rect) => HeadwearPose | null;
+
+  constructor(anchor = headwearAnchor) {
+    this.anchor = anchor;
+  }
 
   update(player: TrackedPlayer, fit: Rect, now: number): HeadwearPose | null {
-    const raw = headwearAnchor(player, fit);
+    const raw = this.anchor(player, fit);
     if (!raw) {
       this.entries.delete(player.id);
       return null;

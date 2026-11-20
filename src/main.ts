@@ -1,9 +1,11 @@
 import { renderMarkup } from './platform/dom.mjs';
 import './ui/style.css';
+import './ui/storybook.css';
 import type { CropRect, Quality, ReachZone, TrackedPlayer, VisionFrame } from './types.ts';
 import { CameraSession, cameraError } from './platform/camera.ts';
 import { frameLoop, Sound, downloadDiagnostics } from './platform/runtime.ts';
 import { AnomalyLog } from './platform/anomaly-log.ts';
+import { gameArt } from './platform/game-art.ts';
 import { Metrics } from './platform/metrics.ts';
 import { VisionPipeline } from './vision/pipeline.ts';
 import { PlayerTracker } from './interaction/tracker.ts';
@@ -168,13 +170,14 @@ function dialog(kind: string, html: string) {
 }
 function show(next: Page) {
   closeDialog(); navigation.reset(); page = next;
+  if (state.game === 'hearts') void gameArt.preload();
   if (page !== 'game') { field = null; hearts = null; countdown = 0; }
   renderMarkup(main, page === 'home' ? homeView(state) : page === 'device' ? deviceView(state) : page === 'calibration' ? calibrationView(state) : page === 'game' ? gameView(state) : resultsView(state));
   main.dataset.page = page;
   main.dataset.game = state.game;
   main.focus({ preventScroll: true });
   const canvas = document.querySelector<HTMLCanvasElement>('#stage');
-  stage = canvas ? new Stage(canvas, state.game === 'poses' ? { illustration: poseScene(Array.from({ length: state.players }, () => 'rest'), state.spaceMode), opacity: 1, background: '#dceee5' } : undefined) : null;
+  stage = canvas ? new Stage(canvas, state.game === 'poses' ? { illustration: poseScene(Array.from({ length: state.players }, () => 'rest'), state.spaceMode), opacity: 1, background: '#dceee5' } : { demoFaces: state.mode === 'demo' && state.game === 'hearts' && page === 'game' }) : null;
   poseArt = '';
   if (canvas) {
     const pointer = (event: PointerEvent | MouseEvent) => {
@@ -285,7 +288,7 @@ function startRound() {
     state.gentle,
     event => { const next = hit(state.round, event.id, event.points); if (next === state.round) return false; state.round = next; if (event.golden) state.goldenHearts += 1; sound.pop(event.golden ? next.combo + 6 : next.combo); return true; },
     () => state.round = miss(state.round),
-    event => { const next = penalty(state.round, event.id, event.points); if (next === state.round) return false; state.round = next; state.bombedCount += 1; sound.boom(); toast('嘭！接到炸弹啦，变身小黑脸！'); return true; },
+    event => { const next = penalty(state.round, event.id, event.points); if (next === state.round) return false; state.round = next; state.bombedCount += 1; sound.boom(); toast('嘭！魔法变身，过几秒就恢复啦！'); return true; },
   );
   countdown = 3000; lostSince = 0; wasValid = true; pauseGesture.reset();
 }
@@ -448,7 +451,7 @@ const clock = frameLoop((now, delta) => {
     }
     if (dialogKind === 'pause') { setDisabled('resume', !valid); setText('resume-hint', valid ? '' : ' 请让肩膀入镜；换人或离开较久后，重新打个招呼。'); }
     const handsVisible = state.mode === 'demo' || state.game === 'poses' || players.some(player => player.wrists.some(Boolean));
-    setText('tracking-hint', !modal.open ? (!valid ? '暂停计时中，请让双肩入镜' : !handsVisible ? (state.game === 'hearts' ? '伸出双手，捧住飘落的爱心' : '抬起小手，在画面中拍泡泡') : '') : '');
+    setText('tracking-hint', !modal.open ? (!valid ? '暂停计时中，请让双肩入镜' : !handsVisible ? (state.game === 'hearts' ? '伸出双手，接住爱心和宝物' : '抬起小手，在画面中拍泡泡') : '') : '');
   }
   if (page === 'game' && state.game === 'poses' && now - poseUiTick >= 50) { poseUiTick = now; updatePosePresentation(); }
   if (now - uiTick > 150) {
@@ -456,8 +459,8 @@ const clock = frameLoop((now, delta) => {
     if (page === 'game') {
       if (state.game === 'bubbles' || state.game === 'hearts') {
         setText('score', String(state.round.score)); setText('time', String(Math.ceil(state.round.remainingMs / 1000)));
-        const fallbackLabel = state.game === 'hearts' ? (hearts?.waveLabel() ?? '伸出双手，捧住飘落的爱心') : '拍到泡泡，快乐 +10';
-        const comboLabel = state.game === 'hearts' ? '连续接住 ' + state.round.combo + ' 颗爱心，太有默契啦！' : '连续拍中 ' + state.round.combo + ' 个，默契加倍！';
+        const fallbackLabel = state.game === 'hearts' ? (hearts?.waveLabel() ?? '伸出双手，接住爱心和宝物') : '拍到泡泡，快乐 +10';
+        const comboLabel = state.game === 'hearts' ? '连续接住 ' + state.round.combo + ' 件宝物，太有默契啦！' : '连续拍中 ' + state.round.combo + ' 个，默契加倍！';
         setText('combo-label', state.round.combo > 1 ? comboLabel : fallbackLabel);
         const progress = document.getElementById('time-progress'); if (progress) progress.style.width = state.round.remainingMs / 600 + '%';
       }

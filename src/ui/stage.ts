@@ -2,10 +2,11 @@ import type { CropRect, Rect, TrackedPlayer, VisionFrame } from '../types.ts';
 import { framingFit, toStage, validLandmark } from '../interaction/geometry.ts';
 import { faceAnchor, HeadwearTracker } from '../interaction/headwear.ts';
 import { scene } from './scene.mjs';
-import { drawSootFace } from './soot-face.ts';
+import { drawCostumeFace, drawDemoFace } from './storybook-art.ts';
+import type { FaceEffect } from '../game/costumes.ts';
 import { drawUnicornPony } from './unicorn.ts';
 
-export type StageField = { draw(ctx: CanvasRenderingContext2D, fit: Rect): void; clearTrails(): void; sootAlpha?(playerId: number, now: number): number };
+export type StageField = { draw(ctx: CanvasRenderingContext2D, fit: Rect): void; clearTrails(): void; faceEffect?(playerId: number): FaceEffect | null };
 
 export class Stage {
   readonly canvas: HTMLCanvasElement;
@@ -18,10 +19,13 @@ export class Stage {
   private background: string;
   private framing: Rect = { x: 0, y: 0, width: 1, height: 1 };
   private headwear = new HeadwearTracker();
-  constructor(canvas: HTMLCanvasElement, options?: { illustration: string; opacity: number; background: string }) {
+  private faces = new HeadwearTracker(faceAnchor);
+  private demoFaces: boolean;
+  constructor(canvas: HTMLCanvasElement, options?: { illustration?: string; opacity?: number; background?: string; demoFaces?: boolean }) {
     this.setIllustration(options?.illustration ?? scene(2, false));
     this.illustrationOpacity = options?.opacity ?? .14;
     this.background = options?.background ?? '#d9cef2';
+    this.demoFaces = options?.demoFaces ?? false;
     this.canvas = canvas;
     this.ctx = canvas.getContext('2d', { alpha: false })!;
   }
@@ -62,6 +66,7 @@ export class Stage {
     }
     if (frame && now - frame.capturedAt <= 150) {
       this.headwear.prune(new Set(players.map(player => player.id)));
+      this.faces.prune(new Set(players.map(player => player.id)));
       const links = [[11, 13], [13, 15], [12, 14], [14, 16], [11, 12], [11, 23], [12, 24], [23, 24]];
       players.forEach((player, index) => {
         ctx.strokeStyle = index ? '#e88862' : '#5ba991'; ctx.lineWidth = 3;
@@ -69,13 +74,13 @@ export class Stage {
           const p = toStage(player.landmarks[a], fit); const q = toStage(player.landmarks[b], fit);
           ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.lineTo(q.x, q.y); ctx.stroke();
         }
-        const soot = field?.sootAlpha?.(player.id, now) ?? 0;
-        if (soot > 0) {
-          const face = faceAnchor(player, fit);
-          if (face) drawSootFace(ctx, face, soot, now);
+        const effect = field?.faceEffect?.(player.id);
+        const face = this.faces.update(player, fit, now);
+        if (effect && face) {
+          drawCostumeFace(ctx, face, effect);
         }
         const crown = this.headwear.update(player, fit, now);
-        if (crown) {
+        if (crown && !effect) {
           const headroom = crown.y < crown.size * 0.85 ? Math.max(0.55, crown.y / (crown.size * 0.85)) : 1;
           drawUnicornPony(ctx, { ...crown, y: Math.max(crown.size * headroom * 0.82, crown.y), size: crown.size * headroom }, index, now);
         }
@@ -87,7 +92,11 @@ export class Stage {
         ctx.fillStyle = '#f9da78';
         for (const landmark of hand.landmarks) if (validLandmark(landmark)) { const p = toStage(landmark, fit); ctx.beginPath(); ctx.arc(p.x, p.y, 2.8, 0, 7); ctx.fill(); }
       }
-    } else this.headwear.reset();
+    } else {
+      this.headwear.reset();
+      this.faces.reset();
+    }
     field?.draw(ctx, fit);
+    if (this.demoFaces) drawDemoFace(ctx, w - 92, 100, 48, field?.faceEffect?.(1) ?? null);
   }
 }

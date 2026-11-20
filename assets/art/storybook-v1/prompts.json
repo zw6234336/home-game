@@ -1,0 +1,70 @@
+{
+  "generator": "built-in image_gen",
+  "generatedAt": "2026-11-20",
+  "transparentBackground": true,
+  "assets": [
+    {
+      "name": "crystal-slipper",
+      "prompt": "Use case: stylized-concept. Asset type: production-ready transparent PNG sprite for a high-quality family motion game viewed on a TV, for children and parents. Art direction: charming hand-crafted 3D storybook toy, soft rounded forms, pearlescent finish, luminous pastel colours, delicate but readable detail, coherent polished mobile-console game art. One isolated subject only, centered in a square frame, fully visible with 12% transparent margin on all sides. Straight-on or slight three-quarter view as specified. Soft studio illumination from upper left, restrained highlights, no ground or cast shadow outside the object, no scenery, no floor, no letters, no logos, no watermark, no extra objects, no borders. Genuine transparent background, clean alpha edges. Must read clearly at 90 pixels. A single beautiful Cinderella-like glass slipper, elegant curved modest heel, side three-quarter view with toe pointing left. Pale icy cyan faceted translucent crystal, opalescent lavender reflections, a small sculpted crystal bow on the toe. Strong chunky recognizable silhouette, charming rather than realistic footwear.",
+      "runtimeSize": 384,
+      "original": "assets/art/storybook-v1/originals/crystal-slipper.png",
+      "runtime": "public/art/storybook-v1/crystal-slipper.webp",
+      "runtimeBytes": 23432,
+      "sha256": "dd9a1734206492e0b6befae2b3606dfad046ab4cfa76388963f9b8ae4f7b6f38"
+    },
+    {
+      "name": "storybook-handbag",
+      "prompt": "Use case: stylized-concept. Asset type: production-ready transparent PNG sprite for a high-quality family motion game viewed on a TV, for children and parents. Art direction: charming hand-crafted 3D storybook toy, soft rounded forms, pearlescent finish, luminous pastel colours, delicate but readable detail, coherent polished mobile-console game art. One isolated subject only, centered in a square frame, fully visible with 12% transparent margin on all sides. Straight-on or slight three-quarter view as specified. Soft studio illumination from upper left, restrained highlights, no ground or cast shadow outside the object, no scenery, no floor, no letters, no logos, no watermark, no extra objects, no borders. Genuine transparent background, clean alpha edges. Must read clearly at 90 pixels. A small rounded pastel rose-pink princess handbag, front three-quarter view, one short curved handle, scalloped flap, a small gold star-shaped clasp. Soft pearlescent toy-leather with gentle quilted diamond panels, tiny gold trim. Cute robust silhouette, no brand and no text.",
+      "runtimeSize": 384,
+      "original": "assets/art/storybook-v1/originals/storybook-handbag.png",
+      "runtime": "public/art/storybook-v1/storybook-handbag.webp",
+      "runtimeBytes": 29942,
+      "sha256": "3b62bc1867fbee7763828c847cccd152bbdadbd66ba4e1e3634174209c74decf"
+    },
+    {
+      "name": "princess-dress",
+      "prompt": "Use case: stylized-concept. Asset type: production-ready transparent PNG sprite for a high-quality family motion game viewed on a TV, for children and parents. Art direction: charming hand-crafted 3D storybook toy, soft rounded forms, pearlescent finish, luminous pastel colours, delicate but readable detail, coherent polished mobile-console game art. One isolated subject only, centered in a square frame, fully visible with 12% transparent margin on all sides. Straight-on or slight three-quarter view as specified. Soft studio illumination from upper left, restrained highlights, no ground or cast shadow outside the object, no scenery, no floor, no letters, no logos, no watermark, no extra objects, no borders. Genuine transparent background, clean alpha edges. Must read clearly at 90 pixels. A miniature standalone lavender and rose-pink princess ball gown, straight-on front view, no person, no mannequin or hanger. Puffy short sleeves, fitted little bodice, a small gold star brooch, full bell-shaped layered satin skirt with pearly scalloped overskirt. Round friendly shape, clear silhouette, no floating body parts.",
+      "runtimeSize": 384,
+      "original": "assets/art/storybook-v1/originals/princess-dress.png",
+      "runtime": "public/art/storybook-v1/princess-dress.webp",
+      "runtimeBytes": 27996,
+      "sha256": "925458f0fcc6a0271e0a7ccc86d4ca8f5db19d8b5f0dda487f7bf169eee90443"
+    },
+    {
+      "name": "royal-crown",
+      "prompt": "Use case: stylized-concept. Asset type: production-ready transparent PNG sprite for a high-quality family motion game viewed on a TV, for children and parents. Art direction: charming hand-crafted 3D storybook toy, soft rounded forms, pearlescent finish, luminous pastel colours, delicate but readable detail, coherent polished mobile-console game art. One isolated subject only, centered in a square frame, fully visible with 12% transparent margin on all sides. Straight-on or slight three-quarter view as specified. Soft studio illumination from upper left, restrained highlights, no ground or cast shadow outside the object, no scenery, no floor, no letters, no logos, no watermark, no extra objects, no borders. Genuine transparent background, clean alpha edges. Must read clearly at 90 pixels. A small storybook golden crown, frontal slightly three-quarter view with five rounded tips, pastel rose and mint gemstone insets, pearl highlights. Warm honey gold, elegant toy-like thickness and rounded edges, centered symmetrical silhouette. No cushion, no hair or head.",
+      "runtimeSize": 384,
+      "original": "assets/art/storybook-v1/originals/royal-crown.png",
+      "runtime": "public/art/storybook-v1/royal-crown.webp",
+      "runtimeBytes": 25612,
+      "sha256": "f18415c9abbbccb7b39a6bb066a310177933f5a28211424b8cf6ea0448942881"
+    },
+    {
+      "name": "donkey-mask",
+      "prompt": "Use case: stylized-concept. Asset type: production-ready transparent PNG sprite for a high-quality family motion game viewed on a TV, for children and parents. Art direction: charming hand-crafted 3D storybook toy, soft rounded forms, pearlescent finish, luminous pastel colours, delicate but readable detail, coherent polished mobile-console game art. One isolated subject only, centered in a square frame, fully visible with 12% transparent margin on all sides. Straight-on or slight three-quarter view as specified. Soft studio illumination from upper left, restrained highlights, no ground or cast shadow outside the object, no scenery, no floor, no letters, no logos, no watermark, no extra objects, no borders. Genuine transparent background, clean alpha edges. Must read clearly at 90 pixels. A friendly hilarious baby donkey HEAD ONLY facing exactly forward, fully symmetric and centered. Long upright ears with pink interiors entirely inside the frame, soft lavender-grey plush-like face, short fluffy dark forelock, wide pale cream muzzle, tiny warm smiling mouth and big kind brown cartoon eyes looking forward. It is a full opaque cartoon head to overlay a player's face like an AR costume, no neck or body, no accessories. Not photorealistic, not scary, no silly text. Head lower jaw near bottom margin, ears near top margin.",
+      "runtimeSize": 512,
+      "original": "assets/art/storybook-v1/originals/donkey-mask.png",
+      "runtime": "public/art/storybook-v1/donkey-mask.webp",
+      "runtimeBytes": 45106,
+      "sha256": "64ed46f3450a65e630b9adce0346f4ecc812a50d50a32d83fa262df42c7763af"
+    },
+    {
+      "name": "piglet-mask",
+      "prompt": "Use case: stylized-concept. Asset type: production-ready transparent PNG sprite for a high-quality family motion game viewed on a TV, for children and parents. Art direction: charming hand-crafted 3D storybook toy, soft rounded forms, pearlescent finish, luminous pastel colours, delicate but readable detail, coherent polished mobile-console game art. One isolated subject only, centered in a square frame, fully visible with 12% transparent margin on all sides. Straight-on or slight three-quarter view as specified. Soft studio illumination from upper left, restrained highlights, no ground or cast shadow outside the object, no scenery, no floor, no letters, no logos, no watermark, no extra objects, no borders. Genuine transparent background, clean alpha edges. Must read clearly at 90 pixels. A friendly hilarious baby piglet HEAD ONLY facing exactly forward, fully symmetric and centered. Soft peach-pink rounded face, two floppy triangular pig ears, large cute rounded pink snout with two nostrils, little warm smiling mouth and big kind brown cartoon eyes looking forward. It is a full opaque cartoon head to overlay a player's face like an AR costume, no neck or body, no accessories. Soft toy-like shading, not photorealistic, not scary. Fully visible ears and cheeks.",
+      "runtimeSize": 512,
+      "original": "assets/art/storybook-v1/originals/piglet-mask.png",
+      "runtime": "public/art/storybook-v1/piglet-mask.webp",
+      "runtimeBytes": 25372,
+      "sha256": "c61efb472a825f760474968b436fd54f6da45357375ab6732befcd0eec4770b1"
+    },
+    {
+      "name": "surprise-bomb",
+      "prompt": "Use case: stylized-concept. Asset type: production-ready transparent PNG sprite for a high-quality family motion game viewed on a TV, for children and parents. Art direction: charming hand-crafted 3D storybook toy, soft rounded forms, pearlescent finish, luminous pastel colours, delicate but readable detail, coherent polished mobile-console game art. One isolated subject only, centered in a square frame, fully visible with 12% transparent margin on all sides. Straight-on or slight three-quarter view as specified. Soft studio illumination from upper left, restrained highlights, no ground or cast shadow outside the object, no scenery, no floor, no letters, no logos, no watermark, no extra objects, no borders. Genuine transparent background, clean alpha edges. Must read clearly at 90 pixels. A playful small cartoon surprise bomb for a children's game: rounded deep plum shiny ball with a short stubby brass cap and a single bent rope fuse ending in a tiny friendly golden sparkle. Slight three-quarter view. No realistic explosive details, no skull, no text, no angry face. Distinct strong silhouette that contrasts with pastel treasures, soft toy aesthetic.",
+      "runtimeSize": 384,
+      "original": "assets/art/storybook-v1/originals/surprise-bomb.png",
+      "runtime": "public/art/storybook-v1/surprise-bomb.webp",
+      "runtimeBytes": 20822,
+      "sha256": "739be6c638b03820169009e45cf8ea55266899123ee25547f9014afd434e3ea8"
+    }
+  ]
+}

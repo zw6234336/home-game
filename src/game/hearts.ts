@@ -1,5 +1,8 @@
 import type { Point, ReachZone, Rect } from '../types.ts';
 import { intersectsSweep, toStage } from '../interaction/geometry.ts';
+import { treasureForTier, type TreasureArt } from '../art/catalog.ts';
+import { FaceEffects, faceNames, type FaceEffect } from './costumes.ts';
+import { drawTreasure } from '../ui/storybook-art.ts';
 
 export type HeartKind = 'pink' | 'big' | 'gold';
 export type FallingKind = HeartKind | 'bomb';
@@ -19,6 +22,7 @@ type FallingItem = {
   phase: number;
   radius: number;
   kind: FallingKind;
+  art: TreasureArt | 'bomb' | null;
   points: number;
   color: string;
   age: number;
@@ -182,7 +186,7 @@ export class HeartCatchField {
   private bursts: Burst[] = [];
   private popTexts: PopText[] = [];
   private catchers: CatchPair[] = [];
-  private sootUntil = new Map<number, number>();
+  private costumes = new FaceEffects();
   private pulseAge = 1000;
   private zones: ReachZone[] = [];
   private serial = 0;
@@ -215,32 +219,26 @@ export class HeartCatchField {
     if (Number.isFinite(ms)) this.remainingMs = Math.max(0, ms);
   }
 
-  sootAlpha(playerId: number, now: number): number {
-    if (!Number.isFinite(now)) return 0;
-    const until = this.sootUntil.get(playerId);
-    if (until === undefined) return 0;
-    const left = until - now;
-    if (left <= 0) {
-      this.sootUntil.delete(playerId);
-      return 0;
-    }
-    return left < 1200 ? left / 1200 : 1;
+  faceEffect(playerId: number): FaceEffect | null {
+    return this.costumes.get(playerId);
   }
 
   waveLabel(): string {
-    if (this.remainingMs <= 15000) return '爱心大丰收！快接金色爱心、躲开炸弹';
-    if (this.remainingMs <= 40000) return '欢快爱心雨 · 接住爱心，躲开炸弹！';
-    return '移动肩宽小篮接爱心，小心炸弹变小黑脸！';
+    if (this.remainingMs <= 15000) return '宝物大丰收！皇冠 +30，躲开变身炸弹';
+    if (this.remainingMs <= 40000) return '爱心和宝物一起落下，稳稳接住！';
+    return '接水晶鞋、包包和公主裙，小心炸弹让你变身！';
   }
 
   setZones(zones: ReachZone[]): void {
     this.zones = zones
       .filter(zone => [zone.playerId, zone.x, zone.y, zone.width, zone.height].every(Number.isFinite) && zone.x >= 0 && zone.y >= 0 && zone.width > 0 && zone.height > 0 && zone.x + zone.width <= 1 && zone.y + zone.height <= 1)
       .map(zone => ({ ...zone }));
+    this.costumes.prune(new Set(this.zones.map(zone => zone.playerId)));
   }
 
   update(delta: number, fit: Rect): void {
     if (!Number.isFinite(delta) || delta < 0 || !Number.isFinite(fit.height) || fit.height <= 0 || !Number.isFinite(fit.width) || fit.width <= 0) return;
+    this.costumes.advance(delta);
     const dt = delta / 1000;
     this.spawnAge += delta;
     this.pulseAge = Math.min(1000, this.pulseAge + delta);
@@ -285,6 +283,7 @@ export class HeartCatchField {
         phase: Math.random() * Math.PI * 2,
         radius: pxRadius / fit.height,
         kind,
+        art: kind === 'bomb' ? 'bomb' : treasureForTier(kind, this.serial),
         points,
         color,
         age: 0,
@@ -322,17 +321,17 @@ export class HeartCatchField {
     this.popTexts = this.popTexts.filter(label => label.age < 860);
   }
 
-  hands(pairs: CatchPair[], fit: Rect, now = performance.now()): void {
+  hands(pairs: CatchPair[], fit: Rect, _now?: number): void {
     this.catchers = pairs.map(pair => ({
       playerId: pair.playerId,
       left: validPoint(pair.left) ? { ...pair.left } : null,
       right: validPoint(pair.right) ? { ...pair.right } : null,
       shoulderWidth: Number.isFinite(pair.shoulderWidth) && pair.shoulderWidth > 0 ? pair.shoulderWidth : 0.18,
     }));
-    this.collect(fit, now);
+    this.collect(fit);
   }
 
-  pointer(stagePoint: Point, fit: Rect, now = performance.now()): void {
+  pointer(stagePoint: Point, fit: Rect, _now?: number): void {
     if (!Number.isFinite(stagePoint.x) || !Number.isFinite(stagePoint.y) || fit.width <= 0 || fit.height <= 0) return;
     const normX = clamp(1 - (stagePoint.x - fit.x) / fit.width, 0.04, 0.96);
     const normY = clamp((stagePoint.y - fit.y) / fit.height, 0.04, 0.96);
@@ -343,10 +342,10 @@ export class HeartCatchField {
       right: { x: Math.max(0.02, normX - span), y: normY },
       shoulderWidth: 0.16,
     }];
-    this.collect(fit, now);
+    this.collect(fit);
   }
 
-  private collect(fit: Rect, now: number): void {
+  private collect(fit: Rect): void {
     if (!this.catchers.length || !this.items.length) return;
     const segments = this.catchers.map(pair => basketSegment(pair, fit)).filter((segment): segment is BasketSegment => segment !== null);
     if (!segments.length) return;
@@ -362,7 +361,7 @@ export class HeartCatchField {
       }
       if (item.kind === 'bomb') {
         if (this.onBomb({ id: item.id, playerId: catcher.playerId, points: item.points })) {
-          this.sootUntil.set(catcher.playerId, now + 4500);
+          const costume = this.costumes.trigger(catcher.playerId, Math.random());
           for (let i = 0; i < 16; i++) {
             const angle = (i * Math.PI * 2) / 16 + (Math.random() - 0.5) * 0.25;
             const speed = 70 + Math.random() * 140;
@@ -379,7 +378,7 @@ export class HeartCatchField {
             });
           }
           this.bursts = this.bursts.slice(-140);
-          this.popTexts.push({ x: center.x, y: center.y - itemRadius * 0.5, text: '嘭！变小黑脸', color: '#241e2e', age: 0 });
+          this.popTexts.push({ x: center.x, y: center.y - itemRadius * 0.5, text: '变身' + faceNames[costume] + '！', color: '#593a71', age: 0 });
           this.popTexts = this.popTexts.slice(-24);
         } else {
           remaining.push(item);
@@ -471,6 +470,7 @@ export class HeartCatchField {
       const p = toStage(item, fit);
       const r = item.radius * fit.height;
       const tilt = Math.sin(item.age * 0.0028 + item.phase) * (item.kind === 'bomb' ? 0.12 : 0.16);
+      if (item.art && drawTreasure(ctx, item.art, p.x, p.y, r, tilt, item.points)) continue;
       if (item.kind === 'bomb') drawBombShape(ctx, p.x, p.y, r, tilt, item.age);
       else drawHeartShape(ctx, p.x, p.y, r, tilt, item.color, '#302744', item.kind === 'gold');
     }
