@@ -9,10 +9,20 @@ export class Stage {
   fit: Rect = { x: 0, y: 0, width: 1, height: 1 };
   private size = '';
   private illustration = new Image();
-  constructor(canvas: HTMLCanvasElement) {
-    this.illustration.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(scene(2, false));
+  private illustrationMarkup = '';
+  private illustrationOpacity: number;
+  private background: string;
+  constructor(canvas: HTMLCanvasElement, options?: { illustration: string; opacity: number; background: string }) {
+    this.setIllustration(options?.illustration ?? scene(2, false));
+    this.illustrationOpacity = options?.opacity ?? .14;
+    this.background = options?.background ?? '#d9cef2';
     this.canvas = canvas;
     this.ctx = canvas.getContext('2d', { alpha: false })!;
+  }
+  setIllustration(markup: string) {
+    if (markup === this.illustrationMarkup) return;
+    this.illustrationMarkup = markup;
+    this.illustration.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(markup);
   }
   draw(video: HTMLVideoElement | null, crop: CropRect, players: TrackedPlayer[], frame: VisionFrame | null, field: BubbleField | null, now: number) {
     const w = this.canvas.clientWidth;
@@ -25,7 +35,7 @@ export class Stage {
     }
     const ctx = this.ctx;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.fillStyle = '#e9e2f3'; ctx.fillRect(0, 0, w, h);
+    ctx.fillStyle = this.illustrationOpacity === 1 ? this.background : '#e9e2f3'; ctx.fillRect(0, 0, w, h);
     const sw = video?.videoWidth ? video.videoWidth * crop.width : 1280;
     const sh = video?.videoHeight ? video.videoHeight * crop.height : 800;
     this.fit = fitRect(sw, sh, w, h);
@@ -35,10 +45,10 @@ export class Stage {
       ctx.globalAlpha = field ? 0.32 : 1;
       ctx.drawImage(video, crop.x * video.videoWidth, crop.y * video.videoHeight, sw, sh, 0, 0, fit.width, fit.height); ctx.restore();
     } else {
-      ctx.fillStyle = '#d9cef2'; ctx.fillRect(fit.x, fit.y, fit.width, fit.height);
-      if (this.illustration.complete && this.illustration.naturalWidth) { ctx.globalAlpha = 0.14; ctx.drawImage(this.illustration, fit.x, fit.y, fit.width, fit.height); ctx.globalAlpha = 1; }
+      ctx.fillStyle = this.background; ctx.fillRect(fit.x, fit.y, fit.width, fit.height);
+      if (this.illustration.complete && this.illustration.naturalWidth) { ctx.globalAlpha = this.illustrationOpacity; ctx.drawImage(this.illustration, fit.x, fit.y, fit.width, fit.height); ctx.globalAlpha = 1; }
       ctx.strokeStyle = '#c9bcdf'; ctx.lineWidth = 1;
-      for (let x = 24; x < w; x += 48) { ctx.beginPath(); ctx.moveTo(x, h); ctx.lineTo(x + 30, h - 70); ctx.stroke(); }
+      if (this.illustrationOpacity < 1) for (let x = 24; x < w; x += 48) { ctx.beginPath(); ctx.moveTo(x, h); ctx.lineTo(x + 30, h - 70); ctx.stroke(); }
     }
     if (frame && now - frame.capturedAt <= 150) {
       const links = [[11, 13], [13, 15], [12, 14], [14, 16], [11, 12], [11, 23], [12, 24], [23, 24]];

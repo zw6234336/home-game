@@ -48,7 +48,11 @@ export class Calibration {
     return this.matches(players);
   }
   matches(players: TrackedPlayer[]) {
-    return players.length === this.count && separated(players) && players.every(player => {
+    return players.length === this.count && this.verifiedPlayers(players).length === this.count;
+  }
+  verifiedPlayers(players: TrackedPlayer[]): TrackedPlayer[] {
+    if (!separated(players)) return [];
+    return players.filter(player => {
       const sample = this.samples.get(player.id);
       return sample?.ready && sameReach(sample, player) && validLandmark(player.landmarks[11]) && validLandmark(player.landmarks[12]);
     });

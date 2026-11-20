@@ -1,0 +1,106 @@
+.game-library { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.game-choices { display: flex; gap: 12px; }
+.game-choices button { flex: 1; border: 1px solid var(--line); border-radius: 16px; display: flex; align-items: center; gap: 13px; padding: 14px 18px; text-align: left; font-weight: 750; background: #fff8; }
+.game-choices small { display: block; font-size: 11px; font-weight: 500; color: var(--muted); margin-top: 4px; }
+.game-choice-mark { color: #8d7da9; font-size: 22px; font-weight: 800; }
+.game-choices button[aria-pressed=true] { background: #eae4f6; border-color: #aa9ac7; box-shadow: inset 0 0 0 1px #aa9ac7; }
+.game-choices #game-poses[aria-pressed=true] { background: #e2efe7; border-color: #7eb59f; box-shadow: inset 0 0 0 1px #7eb59f; }
+.game-library .feature-scene { min-height: 385px; height: clamp(385px, 50vh, 540px); }
+.pose-feature { background: #dceee5; }
+.pose-feature .feature-heading small { color: #4f7966; }
+.pose-feature .scene-labels span { border-color: #afcdbd; color: #4a6d5e; }
+.pose-feature .feature-hint { top: 32%; right: 30px; }
+.pose-layout { display: grid; grid-template-columns: minmax(240px, .42fr) 1fr; gap: 22px; height: clamp(345px, 51vh, 560px); }
+.pose-card { background: #e2efe7; border: 1px solid #c7dfd0; border-radius: 24px; padding: 25px 24px 20px; display: flex; flex-direction: column; align-items: center; text-align: center; overflow: hidden; }
+.pose-card .eyebrow { font-size: 12px; letter-spacing: .06em; color: #527665; }
+.pose-card h2 { font-size: clamp(28px, 2.4vw, 38px); margin-top: 8px; letter-spacing: -.04em; }
+.pose-figure { width: 100%; flex: 1; min-height: 0; margin: 5px 0; }
+.pose-card p { font-size: 17px; line-height: 1.5; font-weight: 650; max-width: 280px; }
+.pose-card-note { font-size: 12px; color: #648373; margin-top: 9px; }
+.pose-stage-stack { display: flex; flex-direction: column; gap: 13px; min-width: 0; min-height: 0; }
+.pose-playfield { position: relative; flex: 1; min-height: 0; border: 6px solid white; border-radius: 24px; overflow: hidden; background: #dceee5; }
+.pose-playfield canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.pose-playfield .preview-badge { top: 16px; left: 16px; font-size: 11px; max-width: calc(100% - 115px); line-height: 1.5; }
+.pose-clock { position: absolute; right: 15px; top: 13px; display: grid; text-align: center; background: #ffffffe8; padding: 8px 14px; border-radius: 16px; }
+.pose-clock b { font-size: 28px; line-height: 1; font-variant-numeric: tabular-nums; }
+.pose-clock span { font-size: 10px; margin-top: 4px; color: var(--muted); }
+.pose-players { display: flex; gap: 12px; }
+.pose-player { flex: 1; min-width: 0; background: white; border: 1px solid var(--line); border-radius: 15px; padding: 14px 16px; }
+.pose-player-top { display: flex; align-items: center; gap: 8px; font-size: 14px; }
+.partner-dot { width: 10px; height: 10px; border-radius: 50%; background: #5ba991; flex-shrink: 0; }
+.pose-player:nth-child(2) .partner-dot { background: #e88862; }
+.pose-player-top > span:last-child { flex: 1; text-align: right; color: var(--muted); font-size: 12px; line-height: 1.45; }
+.pose-player progress { display: block; width: 100%; height: 8px; margin-top: 10px; appearance: none; border: 0; border-radius: 8px; overflow: hidden; background: #e8e4ed; accent-color: #5ba991; }
+.pose-player progress::-webkit-progress-bar { background: #e8e4ed; border-radius: 8px; }
+.pose-player progress::-webkit-progress-value { background: #5ba991; border-radius: 8px; }
+.pose-player progress::-moz-progress-bar { background: #5ba991; border-radius: 8px; }
+.pose-player:nth-child(2) progress { accent-color: #e88862; }
+.pose-player:nth-child(2) progress::-webkit-progress-value { background: #e88862; }
+.pose-player:nth-child(2) progress::-moz-progress-bar { background: #e88862; }
+.pose-player[data-ready=true] { background: #eff7f1; border-color: #8db8a2; }
+.pose-player[data-ready=true] .pose-player-top > span:last-child { color: #367958; }
+.pose-player button { border: 1px solid #d0c8de; width: 100%; border-radius: 9px; font-size: 12px; font-weight: 650; padding: 8px 10px; margin-top: 10px; }
+.pose-player button[aria-pressed=true] { background: #e2efe7; border-color: #6ba68c; }
+.pose-pause { min-height: 52px; padding: 12px 20px; }
+.pose-celebration { position: absolute; inset: 0; background: #e3f1e8ef; display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 13px; text-align: center; padding: 20px; }
+.pose-celebration > span { width: 64px; height: 64px; background: #f5dc81; border-radius: 50%; display: grid; place-items: center; }
+.pose-celebration svg { width: 32px; height: 32px; }
+.pose-celebration h2 { font-size: clamp(23px, 2.3vw, 34px); }
+.pose-celebration p { color: #4f7966; font-size: 20px; font-weight: 700; }
+.pose-journey, .pose-result-stamps { display: grid; grid-template-columns: repeat(6, 1fr); gap: 10px; margin-top: 20px; }
+.pose-stamp { display: flex; align-items: center; gap: 8px; border: 1px solid var(--line); border-radius: 12px; padding: 11px 12px; background: #fff6; color: #91889e; }
+.pose-stamp > span { font-size: 12px; font-variant-numeric: tabular-nums; opacity: .75; }
+.pose-stamp b { font-size: 13px; font-weight: 650; }
+.pose-stamp small { display: none; }
+.pose-stamp[data-status=current] { border-color: #9f86c7; background: #eae4f6; color: var(--ink); }
+.pose-stamp[data-status=matched] { background: #e2efe7; border-color: #a3c7b2; color: #337150; }
+.pose-stamp[data-status=matched] > span { font-size: 0; width: 12px; height: 7px; border-bottom: 2px solid; border-left: 2px solid; transform: rotate(-45deg) translateY(-2px); }
+.pose-stamp[data-status=timeout], .pose-stamp[data-status=skipped] { background: #f1ecf7; color: #796b8d; }
+.pose-bottom { display: flex; justify-content: space-between; gap: 18px; margin-top: 18px; font-size: 12px; color: var(--muted); }
+.pose-bottom kbd { background: white; border: 1px solid var(--line); border-radius: 4px; padding: 2px 5px; }
+.pose-playfield .countdown-overlay { z-index: 3; }
+.pose-results { padding-top: 0; }
+.pose-result-art { width: 250px; height: 145px; overflow: hidden; margin: -12px auto 10px; }
+.pose-result-art svg { width: 100%; height: 100%; }
+.pose-results h1 { margin-top: 10px; }
+.pose-result-stamps { width: min(760px, 100%); margin: 20px auto 0; }
+.pose-result-stamps .pose-stamp { flex-wrap: wrap; justify-content: center; gap: 7px; }
+.pose-result-stamps .pose-stamp small { display: block; width: 100%; font-size: 10px; }
+.pose-results .result-card { margin-top: 22px; }
+.pose-results .result-card strong small { font-size: 18px; }
+@media (min-width:1500px) {
+  .pose-card p { font-size: 21px; }
+  .pose-player-top { font-size: 18px; }
+  .pose-player-top > span:last-child { font-size: 15px; }
+  .pose-player button { font-size: 15px; padding: 10px; }
+  .pose-stamp b { font-size: 17px; }
+  .pose-bottom { font-size: 15px; }
+}
+@media (max-height:800px) and (min-width:1000px) {
+  .game-library { gap: 10px; }
+  .game-choices button { padding: 9px 13px; font-size: 13px; border-radius: 12px; }
+  .game-choices small { font-size: 10px; }
+  .game-choice-mark { font-size: 18px; }
+  .game-library .feature-scene { height: 350px; min-height: 350px; }
+  .pose-layout { height: 345px; gap: 16px; grid-template-columns: .42fr 1fr; }
+  .pose-card { padding: 17px 16px 14px; }
+  .pose-card .eyebrow { font-size: 10px; }
+  .pose-card h2 { font-size: 27px; margin-top: 4px; }
+  .pose-card p { font-size: 14px; }
+  .pose-card-note { font-size: 10px; margin-top: 5px; }
+  .pose-game-header { margin-bottom: 13px; }
+  .pose-player { padding: 10px 12px; }
+  .pose-player-top { font-size: 12px; gap: 6px; }
+  .pose-player-top > span:last-child { font-size: 10px; }
+  .pose-player button { margin-top: 6px; padding: 7px; font-size: 11px; }
+  .pose-journey { margin-top: 13px; gap: 7px; }
+  .pose-stamp { padding: 9px; gap: 6px; }
+  .pose-stamp b { font-size: 12px; }
+  .pose-bottom { margin-top: 12px; font-size: 10px; }
+  .pose-results h1 { font-size: 30px; }
+  .pose-result-art { width: 200px; height: 100px; margin-top: -15px; }
+  .pose-results .result-card { margin-top: 16px; }
+  .pose-result-stamps { margin-top: 12px; }
+  .pose-results .result-actions { margin-top: 18px; }
+  .pose-results .result-note { margin-top: 18px; }
+}

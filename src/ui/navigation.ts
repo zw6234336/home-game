@@ -19,7 +19,7 @@ export class GestureNavigation {
     if (this.target) delete this.target.dataset.dwell;
     this.cursor.style.display = 'none';
   }
-  update(players: TrackedPlayer[], frame: VisionFrame, now: number) {
+  update(players: TrackedPlayer[], frame: VisionFrame, now: number, actions?: readonly string[]) {
     if (now - frame.capturedAt > 150 || now < frame.capturedAt) { this.suspend(); return; }
     const options = players.flatMap(player => player.wrists.flatMap((wrist, side) => wrist && validLandmark(player.landmarks[11 + side]) && wrist.y < player.landmarks[11 + side].y - Math.max(0.03, player.shoulderWidth * 0.15) ? [{ player, wrist, side }] : []));
     options.sort((a, b) => a.wrist.y - b.wrist.y);
@@ -44,7 +44,7 @@ export class GestureNavigation {
     if (this.cursor.parentElement !== parent) parent.append(this.cursor);
     this.cursor.style.display = 'block'; this.cursor.style.left = this.point.x + 'px'; this.cursor.style.top = this.point.y + 'px';
     const element = document.elementFromPoint(this.point.x, this.point.y)?.closest<HTMLButtonElement>('button[data-action]') ?? null;
-    const target = element && !element.disabled && (!modal || modal.contains(element)) ? element : null;
+    const target = element && !element.disabled && (!modal || modal.contains(element)) && (!actions || actions.includes(element.dataset.action ?? '')) ? element : null;
     if (this.target !== target) { if (this.target) delete this.target.dataset.dwell; this.target = target; }
     const result = this.dwell.update({ time: frame.capturedAt, target: target?.dataset.gestureId ?? null, eligible: !!target });
     this.cursor.style.setProperty('--progress', result.progress * 360 + 'deg');

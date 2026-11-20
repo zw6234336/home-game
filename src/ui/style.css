@@ -1,4 +1,5 @@
 @import './base.css';
+@import './pose.css';
 [hidden] { display: none !important; }
 input { font: inherit; color: var(--ink); accent-color: var(--coral); }
 button[data-dwell=true] { outline: 4px solid var(--mint); outline-offset: 4px; }

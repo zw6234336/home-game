@@ -11,13 +11,16 @@ import { validLandmark } from './interaction/geometry.ts';
 import { Calibration } from './game/calibration.ts';
 import { createRound, hit, miss, pauseRound, resumeRound, endRound, advanceRound } from './game/round.ts';
 import { BubbleField, type HandPoint } from './game/field.ts';
+import { PoseSession } from './game/pose-session.ts';
+import { demoPosePlayers, poseScene } from './ui/pose-art.ts';
+import { syncPoseView } from './ui/pose-views.ts';
 import { Stage } from './ui/stage.ts';
 import { GestureNavigation } from './ui/navigation.ts';
 import { icon } from './ui/icons.mjs';
 import { homeView, deviceView, calibrationView, gameView, resultsView, helpView, escapeHtml, type ViewState } from './ui/screens.ts';
 
 type Page = 'home' | 'device' | 'calibration' | 'game' | 'results';
-const state: ViewState = { players: 2, gentle: true, quality: 'quality', round: createRound(), mode: 'live', fine: false };
+const state: ViewState = { players: 2, gentle: true, quality: 'quality', round: createRound(), mode: 'live', fine: false, game: 'bubbles', pose: null };
 const main = document.querySelector<HTMLElement>('#main')!;
 const modal = document.querySelector<HTMLDialogElement>('#modal')!;
 const content = document.querySelector<HTMLElement>('#modal-content')!;
@@ -27,6 +30,11 @@ const navigation = new GestureNavigation();
 let page: Page = 'home';
 let stage: Stage | null = null;
 let field: BubbleField | null = null;
+let pose: PoseSession | null = null;
+let demoPoseActive: boolean[] = [];
+let poseIndex = -1;
+let poseScore = 0;
+let poseArt = '';
 let crop: CropRect = { x: 0, y: 0, width: 1, height: 1 };
 let latest: VisionFrame | null = null;
 let players: TrackedPlayer[] = [];
@@ -42,6 +50,7 @@ let statusMessage = '等待连接';
 let statusError = false;
 let toastUntil = 0;
 let uiTick = 0;
+let poseUiTick = 0;
 let dialogKind = '';
 let connecting = false;
 let operation = 0;
@@ -68,7 +77,11 @@ const pipeline = new VisionPipeline({
       if (progress) progress.value = calibration.readyCount();
       setDisabled('start-round', !calibrated);
     }
-    if (page === 'game' && state.round.phase === 'playing' && !countdown && !modal.open && readyToPlay(now)) {
+    if (page === 'game' && state.game === 'poses' && phase() === 'playing' && !countdown && !modal.open) {
+      pose?.update(calibration.verifiedPlayers(players), frame.capturedAt, camera.video.videoWidth * crop.width / (camera.video.videoHeight * crop.height));
+      syncPoseState();
+    }
+    if (page === 'game' && state.game === 'bubbles' && phase() === 'playing' && !countdown && !modal.open && readyToPlay(now)) {
       const hands: HandPoint[] = players.flatMap(player => player.wrists.flatMap((point, index) => point ? [{ id: player.id + '-' + index, point }] : []));
       if (state.fine && now - frame.handsCapturedAt <= 150) for (const hand of frame.hands) {
         if (!validLandmark(hand.landmarks[0]) || !validLandmark(hand.landmarks[8])) continue;
@@ -79,15 +92,33 @@ const pipeline = new VisionPipeline({
       if (pauseGesture.update(players, frame.capturedAt)) pause('歇一下，快乐不赶时间。');
     } else pauseGesture.reset();
     if (page !== 'game' || modal.open) navigation.update(players, frame, now);
+    else if (state.game === 'poses') navigation.update(players, frame, now, ['pause']);
   }
 });
 
 function setText(id: string, text: string) { const el = document.getElementById(id); if (el && el.textContent !== text) el.textContent = text; }
+function phase() { return state.game === 'poses' ? state.pose?.phase ?? 'paused' : state.round.phase; }
+function syncPoseState() {
+  if (!pose) return;
+  const snapshot = pose.snapshot;
+  if (snapshot.index !== poseIndex) { demoPoseActive = snapshot.players.map(() => false); poseIndex = snapshot.index; }
+  if (snapshot.score > poseScore) sound.pop(snapshot.completed + 4);
+  poseScore = snapshot.score;
+  state.pose = snapshot;
+}
+function updatePosePresentation() {
+  if (!state.pose) return;
+  syncPoseView(state.pose, demoPoseActive, state.mode === 'demo');
+  if (state.mode === 'demo') {
+    const key = state.pose.target + '/' + demoPoseActive.join('/');
+    if (key !== poseArt) { poseArt = key; stage?.setIllustration(poseScene(demoPoseActive.map(active => active ? state.pose!.target : 'rest'))); }
+  }
+}
 function setDisabled(id: string, value: boolean) { const el = document.getElementById(id) as HTMLButtonElement | null; if (el) el.disabled = value; }
 function toast(text: string) { setText('toast', text); document.getElementById('toast')!.classList.add('show'); toastUntil = performance.now() + 4200; }
 function gestures() { document.querySelectorAll<HTMLButtonElement>('button[data-action]').forEach((el, index) => el.dataset.gestureId = page + '/' + dialogKind + '/' + el.dataset.action + '/' + index); }
 function setStatus(text: string, error = false) { statusMessage = text; statusError = error; setText('device-status', text); const el = document.getElementById('device-status'); if (el) el.dataset.error = String(error); }
-function closeDialog() { modal.close(); dialogKind = ''; navigation.reset(); gestures(); pipeline.setHands(page !== 'game' || state.fine); }
+function closeDialog() { modal.close(); dialogKind = ''; navigation.reset(); gestures(); pipeline.setHands(page !== 'game' || state.game === 'bubbles' && state.fine); }
 function dialog(kind: string, html: string) {
   navigation.reset(); dialogKind = kind; renderMarkup(content, html);
   if (!modal.open) modal.showModal();
@@ -98,24 +129,27 @@ function show(next: Page) {
   if (page !== 'game') { field = null; countdown = 0; }
   renderMarkup(main, page === 'home' ? homeView(state) : page === 'device' ? deviceView(state) : page === 'calibration' ? calibrationView(state) : page === 'game' ? gameView(state) : resultsView(state));
   main.dataset.page = page;
+  main.dataset.game = state.game;
   main.focus({ preventScroll: true });
   const canvas = document.querySelector<HTMLCanvasElement>('#stage');
-  stage = canvas ? new Stage(canvas) : null;
+  stage = canvas ? new Stage(canvas, state.game === 'poses' ? { illustration: poseScene(Array.from({ length: state.players }, () => 'rest')), opacity: 1, background: '#dceee5' } : undefined) : null;
+  poseArt = '';
   if (canvas) {
     const pointer = (event: PointerEvent | MouseEvent) => {
-      if (state.mode !== 'demo' || page !== 'game' || state.round.phase !== 'playing' || countdown) return;
+      if (state.mode !== 'demo' || state.game !== 'bubbles' || page !== 'game' || phase() !== 'playing' || countdown) return;
       const rect = canvas.getBoundingClientRect(); field?.pointer({ x: event.clientX - rect.left, y: event.clientY - rect.top }, stage!.fit);
     };
     canvas.addEventListener('pointermove', pointer); canvas.addEventListener('click', pointer);
   }
-  pipeline.setHands(page !== 'game' || state.fine);
+  pipeline.setHands(page !== 'game' || state.game === 'bubbles' && state.fine);
   syncConnection();
   if (page === 'device') { syncDevice(); if (camera.active) void listDevices(); }
   gestures();
 }
 function syncConnection() {
-  setText('connection-badge', state.mode === 'demo' ? '鼠标体验' : camera.active ? '摄像头已连接' : '本地体感');
-  setText('footer-status', state.mode === 'demo' ? '鼠标体验 · 未使用摄像头' : camera.active ? '本地处理 · 不录像、不上传' : 'PS4 体感摄像头 · 本地运行');
+  const demoLabel = state.game === 'poses' ? '按钮演示' : '鼠标体验';
+  setText('connection-badge', state.mode === 'demo' ? demoLabel : camera.active ? '摄像头已连接' : '本地体感');
+  setText('footer-status', state.mode === 'demo' ? demoLabel + ' · 未使用摄像头' : camera.active ? '本地处理 · 不录像、不上传' : 'PS4 体感摄像头 · 本地运行');
   document.getElementById('disconnect')!.hidden = !camera.active;
 }
 function syncDevice() {
@@ -167,36 +201,55 @@ async function startVision() {
 }
 function stopCamera() { operation++; connecting = false; pipeline.stop(); camera.stop(); visionReady = false; clearTracking(); }
 function enterCalibration() { calibration = new Calibration(state.players); calibrated = false; demoCalibrate = 0; show('calibration'); }
-function readyToPlay(now: number) { return state.mode === 'demo' || !!latest && now - latest.capturedAt <= 150 && zones.length === state.players && calibration.matches(players) && zones.every(zone => players.some(player => player.id === zone.playerId && player.wrists.some(Boolean))); }
+function readyToPlay(now: number) { return state.mode === 'demo' || !!latest && now - latest.capturedAt <= 150 && zones.length === state.players && calibration.matches(players) && zones.every(zone => players.some(player => player.id === zone.playerId && (state.game === 'poses' || player.wrists.some(Boolean)))); }
 function startRound() {
   if (!calibrated || state.mode === 'live' && (!latest || performance.now() - latest.capturedAt > 150)) return;
   zones = state.mode === 'demo' ? Array.from({ length: state.players }, (_, index) => ({ playerId: index + 1, x: state.players === 2 ? index * 0.45 + 0.06 : 0.15, y: state.gentle ? 0.42 : 0.2, width: state.players === 2 ? 0.35 : 0.7, height: state.gentle ? 0.4 : 0.64 })) : calibration.zones(players, state.gentle);
-  state.round = pauseRound(createRound()); show('game');
-  field = new BubbleField(zones, state.gentle, id => { const next = hit(state.round, id); if (next === state.round) return false; state.round = next; sound.pop(next.combo); return true; }, () => state.round = miss(state.round));
+  state.round = pauseRound(createRound());
+  if (state.game === 'poses') {
+    pose = new PoseSession(zones.map(zone => zone.playerId), state.gentle); pose.pause(); poseIndex = -1; poseScore = 0; syncPoseState();
+  } else { pose = null; state.pose = null; }
+  show('game');
+  if (state.game === 'bubbles') field = new BubbleField(zones, state.gentle, id => { const next = hit(state.round, id); if (next === state.round) return false; state.round = next; sound.pop(next.combo); return true; }, () => state.round = miss(state.round));
   countdown = 3000; lostSince = 0;
 }
 function pause(reason: string) {
-  if (page !== 'game' || state.round.phase === 'results') return;
-  state.round = pauseRound(state.round); countdown = 0; field?.clearTrails();
-  dialog('pause', '<span class="pause-art" aria-hidden="true"><i></i><i></i></span><h2 id="pause-title">' + escapeHtml(reason) + '</h2><p>时间和得分都为你保留着。<span id="resume-hint"></span></p><button id="resume" class="button primary full" data-action="resume">继续拍泡泡</button><button class="button secondary full" data-action="recalibrate">重新站好位置</button><button id="finish" class="button quiet full" data-action="finish" data-close-modal>结束这一局，看看成绩</button>');
+  if (page !== 'game' || phase() === 'results') return;
+  if (state.game === 'poses') { pose?.pause(); syncPoseState(); updatePosePresentation(); } else state.round = pauseRound(state.round);
+  countdown = 0; field?.clearTrails();
+  const poses = state.game === 'poses';
+  dialog('pause', '<span class="pause-art" aria-hidden="true"><i></i><i></i></span><h2 id="pause-title">' + escapeHtml(reason) + '</h2><p>时间和得分都为你保留着。<span id="resume-hint"></span></p><button id="resume" class="button primary full" data-action="resume">' + (poses ? '继续我们的模仿秀' : '继续拍泡泡') + '</button>' + (poses ? '<button id="skip-pose" class="button secondary full" data-action="skip-pose"' + (state.pose?.stage === 'celebrate' ? ' disabled' : '') + '>换个动作，不扣分</button>' : '') + '<button class="button secondary full" data-action="recalibrate">' + (poses ? '重新站好，开始新一局' : '重新站好位置') + '</button><button id="finish" class="button quiet full" data-action="finish" data-close-modal>结束这一局，看看成绩</button>');
 }
 function resume() {
   if (!readyToPlay(performance.now())) { toast('请回到原来位置。若换了站位，请重新校准。'); return; }
   closeDialog(); field?.clearTrails(); countdown = 3000; lostSince = 0;
   document.getElementById('countdown')!.hidden = false;
 }
-function finish() { state.round = endRound(state.round); show('results'); }
+function finish() { if (state.game === 'poses') { pose?.end(); syncPoseState(); } else state.round = endRound(state.round); show('results'); }
 function diagnostics() {
   if (page === 'game') pause('先看一下运行状态。');
   dialog('diagnostics', '<button class="dialog-close icon-button" data-action="close-modal" data-close-modal aria-label="关闭运行状态">×</button><span class="eyebrow">LOCAL PERFORMANCE</span><h2>看见每一次响应。</h2><div class="metric-grid" id="metrics"></div><p id="metrics-note"></p><p>统计仅包含有效帧，过期帧另计丢弃。物理端到端延迟待电视实测；低帧率时可在设备页切换质量档。</p><button class="button secondary full" data-action="export">导出诊断摘要</button><button class="button primary full" data-action="close-modal">回到游戏</button>');
 }
 function exitHome() {
-  if (page === 'game' && state.round.phase !== 'results') { pause('这局还没结束，先歇一下。'); return; }
+  if (page === 'game' && phase() !== 'results') { pause('这局还没结束，先歇一下。'); return; }
   show('home');
 }
 
 async function action(name: string) {
   switch (name) {
+    case 'select-bubbles': case 'select-poses': {
+      const game = name === 'select-poses' ? 'poses' : 'bubbles';
+      if (page !== 'home' || state.game === game) break;
+      state.game = game; pose = null; state.pose = null; show('home');
+      break;
+    }
+    case 'demo-pose-0': case 'demo-pose-1': {
+      if (state.mode !== 'demo' || state.game !== 'poses' || page !== 'game' || phase() !== 'playing' || countdown || modal.open || state.pose?.stage !== 'pose') break;
+      const index = name.endsWith('0') ? 0 : 1;
+      if (index < state.players) { demoPoseActive[index] = !demoPoseActive[index]; updatePosePresentation(); }
+      break;
+    }
+    case 'skip-pose': if (state.game === 'poses' && page === 'game' && dialogKind === 'pause') { pose?.skip(); syncPoseState(); setDisabled('skip-pose', true); resume(); } break;
     case 'solo': case 'duo': {
       const count = name === 'solo' ? 1 : 2;
       if (count === state.players) break;
@@ -222,11 +275,11 @@ async function action(name: string) {
     case 'again': enterCalibration(); break;
     case 'recalibrate': enterCalibration(); break;
     case 'home': exitHome(); break;
-    case 'help': if (page === 'game') pause('先看看怎么玩。'); dialog('help', helpView()); break;
+    case 'help': if (page === 'game') pause('先看看怎么玩。'); dialog('help', helpView(state.game)); break;
     case 'diagnostics': diagnostics(); break;
-    case 'close-modal': if (page === 'game' && state.round.phase === 'paused') pause('准备好，就继续快乐。'); else closeDialog(); break;
+    case 'close-modal': if (page === 'game' && phase() === 'paused') pause('准备好，就继续快乐。'); else closeDialog(); break;
     case 'disconnect': stopCamera(); show('home'); toast('摄像头已关闭。'); break;
-    case 'export': downloadDiagnostics({ version: '0.1.0', quality: state.quality, mode: state.mode, source: { width: camera.video.videoWidth, height: camera.video.videoHeight, frameRate: camera.settings.frameRate }, metrics: metrics.snapshot(performance.now()), pipeline: pipeline.stats }); break;
+    case 'export': downloadDiagnostics({ version: '0.2.0', game: state.game, quality: state.quality, mode: state.mode, source: { width: camera.video.videoWidth, height: camera.video.videoHeight, frameRate: camera.settings.frameRate }, metrics: metrics.snapshot(performance.now()), pipeline: pipeline.stats }); break;
     case 'sound': sound.enabled = !sound.enabled; await sound.unlock(); updateToolbar(); break;
     case 'fullscreen': try { if (document.fullscreenElement) await document.exitFullscreen(); else await document.documentElement.requestFullscreen(); } catch { toast('首次全屏请点击屏幕上的全屏按钮，或按浏览器 F11。'); } break;
   }
@@ -267,31 +320,44 @@ const clock = frameLoop((now, delta) => {
     const valid = readyToPlay(now);
     if (!valid) { lostSince ||= now; field?.clearTrails(); } else lostSince = 0;
     if (lostSince && now - lostSince >= 1000 && !modal.open) pause('暂时没看清小手，请回到原来位置。');
-    if (delta > 250 && !modal.open && !countdown && state.round.phase === 'playing') pause('画面刚才停了一下，准备好再继续。');
+    if (delta > 250 && !modal.open && !countdown && phase() === 'playing') pause('画面刚才停了一下，准备好再继续。');
     if (countdown && !modal.open) {
       if (valid) countdown = Math.max(0, countdown - Math.min(delta, 100));
       setText('countdown-number', String(Math.ceil(countdown / 1000)));
-      if (!countdown) { state.round = resumeRound(state.round); field?.clearTrails(); document.getElementById('countdown')!.hidden = true; }
-    } else if (!modal.open && state.round.phase === 'playing') {
-      state.round = advanceRound(state.round, delta);
-      if (stage) field?.update(delta, stage.fit);
-      if (state.round.phase === 'results') finish();
+      if (!countdown) {
+        if (state.game === 'poses') { pose?.resume(); syncPoseState(); } else state.round = resumeRound(state.round);
+        field?.clearTrails(); document.getElementById('countdown')!.hidden = true;
+      }
+    } else if (!modal.open && phase() === 'playing') {
+      if (state.game === 'poses') {
+        if (valid) {
+          if (state.mode === 'demo' && state.pose) pose?.update(demoPosePlayers(state.pose.players.map(player => player.id), state.pose.target, demoPoseActive), now, 1);
+          pose?.advance(delta); syncPoseState();
+        }
+      } else {
+        state.round = advanceRound(state.round, delta);
+        if (stage) field?.update(delta, stage.fit);
+      }
+      if (phase() === 'results') finish();
     }
     if (dialogKind === 'pause') { setDisabled('resume', !valid); setText('resume-hint', valid ? '' : ' 请回到原位；换人或换位置需要重新校准。'); }
     setText('tracking-hint', !valid && !modal.open ? '看向摄像头，让小手回到画面里' : '');
   }
+  if (page === 'game' && state.game === 'poses' && now - poseUiTick >= 50) { poseUiTick = now; updatePosePresentation(); }
   if (now - uiTick > 150) {
     uiTick = now;
     if (page === 'game') {
+      if (state.game === 'bubbles') {
       setText('score', String(state.round.score)); setText('time', String(Math.ceil(state.round.remainingMs / 1000)));
       setText('combo-label', state.round.combo > 1 ? '连续拍中 ' + state.round.combo + ' 个，默契加倍！' : '拍到泡泡，快乐 +10');
       const progress = document.getElementById('time-progress'); if (progress) progress.style.width = state.round.remainingMs / 600 + '%';
+      }
     }
     if (dialogKind === 'diagnostics') {
       const snapshot = metrics.snapshot(now);
       const values = [['画面绘制', snapshot.renderFps + ' fps'], ['有效姿态更新', snapshot.poseFps + ' Hz'], ['有效帧推理 P95', snapshot.inferenceP95 + ' ms'], ['有效帧年龄 P95', snapshot.frameAgeP95 + ' ms']];
       renderMarkup(document.getElementById('metrics')!, values.map(([label, value]) => '<div><small>' + label + '</small><b>' + value + '</b></div>').join(''));
-      setText('metrics-note', state.mode === 'demo' ? '鼠标体验没有启用识别模型，识别统计为 0。' : '执行器 ' + (pipeline.stats.delegate ?? '未启动') + ' · 丢弃 ' + pipeline.stats.dropped + ' 帧 · 采集 ' + camera.video.videoWidth + ' × ' + camera.video.videoHeight);
+      setText('metrics-note', state.mode === 'demo' ? '演示模式没有启用识别模型，识别统计为 0。' : '执行器 ' + (pipeline.stats.delegate ?? '未启动') + ' · 丢弃 ' + pipeline.stats.dropped + ' 帧 · 采集 ' + camera.video.videoWidth + ' × ' + camera.video.videoHeight);
     }
   }
   if (toastUntil && now > toastUntil) { document.getElementById('toast')!.classList.remove('show'); toastUntil = 0; }
