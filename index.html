@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f5f3fa">
+  <meta name="description" content="一起玩，把客厅变成游乐场。电视家庭体感泡泡派对。">
+  <title>一起玩 · Home Game</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 48 48'%3E%3Crect width='48' height='48' rx='16' fill='%23f47d5b'/%3E%3Cpath d='M12 28Q24 42 36 28M17 16v5M31 16v5' stroke='%23302744' stroke-width='4' stroke-linecap='round' fill='none'/%3E%3C/svg%3E">
+
+  <script type="module" src="/src/main.ts"></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">跳到主要内容</a>
+  <div class="shell">
+    <header class="topbar">
+      <button class="brand" data-action="home" aria-label="一起玩，返回游戏大厅">
+        <span class="brand-mark" aria-hidden="true"><i></i><i></i><b></b></span>
+        <span>一起玩<small>HOME GAME</small></span>
+      </button>
+      <nav aria-label="主导航">
+        <button id="nav-home" class="nav-link active" data-action="home">游戏大厅</button>
+        <button class="nav-link" data-action="help">怎么玩</button><button class="nav-link" data-action="diagnostics">运行状态</button>
+      </nav>
+      <div class="header-tools">
+        <span id="connection-badge" class="prototype-badge"><span></span>本地体感</span>
+        <button id="sound-toggle" class="icon-button" data-action="sound" aria-label="关闭声音" aria-pressed="true"></button>
+        <button id="fullscreen-toggle" class="icon-button" data-action="fullscreen" aria-label="进入全屏"></button>
+      </div>
+    </header>
+    <main id="main" tabindex="-1"></main>
+    <footer class="footer"><span>让快乐，发生在一起。</span><span id="footer-status">PS4 体感摄像头 · 本地运行</span><button id="disconnect" data-action="disconnect" hidden>结束摄像头</button><span>HOME GAME <i> / </i> PLAY TOGETHER</span></footer>
+  </div>
+  <dialog id="modal" class="dialog"><div id="modal-content"></div></dialog>
+  <div id="gesture-cursor" aria-hidden="true"><span></span></div>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+</body>
+</html>

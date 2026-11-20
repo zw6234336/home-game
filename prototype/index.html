@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f5f3fa">
+  <meta name="description" content="一起玩，把客厅变成游乐场。家庭体感泡泡派对交互原型。">
+  <title>一起玩 · Home Game</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 48 48'%3E%3Crect width='48' height='48' rx='16' fill='%23f47d5b'/%3E%3Cpath d='M12 28Q24 42 36 28M17 16v5M31 16v5' stroke='%23302744' stroke-width='4' stroke-linecap='round' fill='none'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="./style.css">
+  <script type="module" src="./app.mjs"></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">跳到主要内容</a>
+  <div class="shell">
+    <header class="topbar">
+      <button class="brand" data-action="home" aria-label="一起玩，返回游戏大厅">
+        <span class="brand-mark" aria-hidden="true"><i></i><i></i><b></b></span>
+        <span>一起玩<small>HOME GAME</small></span>
+      </button>
+      <nav aria-label="主导航">
+        <button id="nav-home" class="nav-link active" data-action="home">游戏大厅</button>
+        <button class="nav-link" data-action="help">怎么玩</button>
+      </nav>
+      <div class="header-tools">
+        <span class="prototype-badge"><span></span>交互原型</span>
+        <button id="sound-toggle" class="icon-button" data-action="sound" aria-label="关闭声音" aria-pressed="true"></button>
+        <button id="fullscreen-toggle" class="icon-button" data-action="fullscreen" aria-label="进入全屏"></button>
+      </div>
+    </header>
+    <main id="main" tabindex="-1"></main>
+    <footer class="footer"><span>让快乐，发生在一起。</span><span class="footer-note">鼠标试玩版 · 暂未连接摄像头</span><span>HOME GAME <i> / </i> PLAY TOGETHER</span></footer>
+  </div>
+  <dialog id="help-dialog" class="dialog">
+    <button class="dialog-close icon-button" data-action="close-help" data-close-modal aria-label="关闭玩法说明">×</button>
+    <span class="eyebrow">HOW TO PLAY</span>
+    <h2>不用学，放开玩。</h2>
+    <div class="help-list">
+      <div><b>1</b><section><h3>选好你的搭档</h3><p>自己挑战，或两个人一起得分。每局 60 秒，没有输家。</p></section></div>
+      <div><b>2</b><section><h3>伸手，拍掉泡泡</h3><p>正式游戏用手挥拍。现在移动鼠标碰到泡泡，或点击泡泡，试试击中的感觉。</p></section></div>
+      <div><b>3</b><section><h3>随时歇一歇</h3><p>按空格暂停，返回时会重新倒数。Tab 选择泡泡，Enter 也能拍中。</p></section></div>
+    </div>
+    <div class="notice">当前为交互原型。设备与站位使用模拟画面，不读取、保存或上传摄像头影像。</div>
+    <button class="button primary full" data-action="close-help">知道了</button>
+  </dialog>
+  <dialog id="pause-dialog" class="dialog pause-dialog">
+    <button class="dialog-close icon-button" data-action="resume" data-close-modal aria-label="关闭暂停并继续游戏">×</button>
+    <span class="pause-art" aria-hidden="true"><i></i><i></i></span>
+    <span class="eyebrow">TAKE A LITTLE BREAK</span>
+    <h2 id="pause-title">歇一下，快乐不赶时间。</h2>
+    <p id="pause-description">时间和得分都为你保留着。</p>
+    <button id="resume" class="button primary full" data-action="resume">继续拍泡泡 <span>→</span></button>
+    <button id="finish" class="button quiet full" data-action="finish">结束这一局，看看成绩</button>
+  </dialog>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+</body>
+</html>

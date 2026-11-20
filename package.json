@@ -1,0 +1,18 @@
+{
+  "name": "home-game",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=24.0.0 <25" },
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "assets": "node scripts/prepare-assets.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test tests/*.test.ts",
+    "build": "npm run typecheck && vite build",
+    "preview": "vite preview --host 127.0.0.1",
+    "start": "vite preview --host 127.0.0.1 --port 4173"
+  },
+  "dependencies": { "@mediapipe/tasks-vision": "1.2.3" },
+  "devDependencies": { "typescript": "7.0.2", "vite": "8.3.8", "@types/node": "24.10.1" }
+}

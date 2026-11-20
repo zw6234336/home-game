@@ -1,0 +1,6 @@
+node_modules/
+dist/
+public/models/*.task
+public/wasm/
+public/asset-manifest.json
+.DS_Store
