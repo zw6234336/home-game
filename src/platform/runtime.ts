@@ -40,6 +40,22 @@ export class Sound {
     note.stop(start + 0.19);
     note.onended = () => { note.disconnect(); volume.disconnect(); };
   }
+  boom() {
+    if (!this.enabled || this.context?.state !== 'running') return;
+    const ctx = this.context;
+    const note = ctx.createOscillator();
+    const volume = ctx.createGain();
+    const start = ctx.currentTime;
+    note.type = 'sawtooth';
+    note.frequency.setValueAtTime(190, start);
+    note.frequency.exponentialRampToValueAtTime(46, start + 0.28);
+    volume.gain.setValueAtTime(0.085, start);
+    volume.gain.exponentialRampToValueAtTime(0.001, start + 0.34);
+    note.connect(volume).connect(ctx.destination);
+    note.start(start);
+    note.stop(start + 0.36);
+    note.onended = () => { note.disconnect(); volume.disconnect(); };
+  }
   close() { void this.context?.close(); this.context = null; }
 }
 

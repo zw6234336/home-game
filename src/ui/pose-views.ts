@@ -7,7 +7,7 @@ import { icon } from './icons.mjs';
 import { poseIllustration, poseScene } from './pose-art.ts';
 
 export function gameChoices(game: string) {
-  return '<div class="game-choices" role="group" aria-label="选择游戏"><button id="game-bubbles" data-action="select-bubbles" aria-pressed="' + (game === 'bubbles') + '"><span class="game-choice-mark">01</span><span>泡泡派对<small>挥挥手，拍出快乐</small></span></button><button id="game-poses" data-action="select-poses" aria-pressed="' + (game === 'poses') + '"><span class="game-choice-mark">02</span><span>默契模仿秀<small>摆个姿势，一起过关</small></span></button></div>';
+  return '<div class="game-choices" role="group" aria-label="选择游戏"><button id="game-bubbles" data-action="select-bubbles" aria-pressed="' + (game === 'bubbles') + '"><span class="game-choice-mark">01</span><span>泡泡派对<small>挥挥手，拍出快乐</small></span></button><button id="game-poses" data-action="select-poses" aria-pressed="' + (game === 'poses') + '"><span class="game-choice-mark">02</span><span>默契模仿秀<small>摆个姿势，一起过关</small></span></button><button id="game-hearts" data-action="select-hearts" aria-pressed="' + (game === 'hearts') + '"><span class="game-choice-mark">03</span><span>爱心雨<small>双手接住飘落爱心</small></span></button></div>';
 }
 
 export function poseFeature(count: 1 | 2, mode: SpaceMode = 'standard') {

@@ -3,7 +3,7 @@ import { validLandmark } from '../interaction/geometry.ts';
 import { HoldGesture } from '../interaction/raise.ts';
 
 type Signature = { center: Point; width: number; height: number | null };
-type Sample = { hold: HoldGesture; ready: boolean; invalidated: boolean; minX: number; maxX: number; minY: number; maxY: number; seen: number; signature: Signature };
+type Sample = { hold: HoldGesture; ready: boolean; invalidated: boolean; suspendedAt: number | null; minX: number; maxX: number; minY: number; maxY: number; seen: number; signature: Signature };
 
 function signature(player: TrackedPlayer): Signature | null {
   const landmarks = player.landmarks;
@@ -57,30 +57,41 @@ export class Calibration {
   private samples = new Map<number, Sample>();
   private count: 1 | 2;
   private lastTime: number | null = null;
+  private diagnostic = 'idle';
   constructor(count: 1 | 2) { this.count = count; }
+  lastDiagnostic() { return this.diagnostic; }
   update(players: TrackedPlayer[], time: number) {
-    if (!Number.isFinite(time)) { this.samples.forEach(invalidate); return false; }
+    if (!Number.isFinite(time)) { this.diagnostic = 'clock_invalid'; this.samples.forEach(invalidate); return false; }
     this.lastTime = time;
     for (const [id, sample] of this.samples) if (!players.some(player => player.id === id)) {
       sample.hold.update(false, time);
       if (time - sample.seen > 500) invalidate(sample);
     }
     const room = separated(players);
+    if (!room) this.diagnostic = 'not_separated';
+    else if (players.length === 0) this.diagnostic = 'no_player';
+    let anyHold = false;
+    let missingShoulder = false;
+    let missingWrist = false;
     for (const player of players) {
       let sample = this.samples.get(player.id);
       const next = signature(player);
       if (!next) {
+        missingShoulder = true;
         sample?.hold.update(false, time);
         if (sample && time - sample.seen > 500) invalidate(sample);
         continue;
       }
       if (!sample || sample.invalidated || !sameReach(sample, player) || time < sample.seen || time - sample.seen > 500) {
-        sample = { hold: new HoldGesture(2000), ready: false, invalidated: false, minX: Infinity, maxX: -Infinity, minY: Infinity, maxY: -Infinity, seen: time, signature: next };
+        sample = { hold: new HoldGesture(2000), ready: false, invalidated: false, suspendedAt: null, minX: Infinity, maxX: -Infinity, minY: Infinity, maxY: -Infinity, seen: time, signature: next };
         this.samples.set(player.id, sample);
       }
       sample.seen = time;
+      sample.suspendedAt = null;
       sample.signature = { ...next, height: next.height ?? sample.signature.height };
       const wrists = player.wrists.filter(usableWrist);
+      if (wrists.length === 0) missingWrist = true;
+      if (room && player.raised && wrists.length > 0) anyHold = true;
       if (sample.hold.update(room && player.raised && wrists.length > 0, time)) sample.ready = true;
       for (const wrist of wrists) {
         const x = (wrist.x - next.center.x) / next.width;
@@ -89,10 +100,14 @@ export class Calibration {
         sample.minY = Math.min(sample.minY, y); sample.maxY = Math.max(sample.maxY, y);
       }
     }
-    return this.matches(players);
+    const matched = this.matches(players);
+    if (matched) this.diagnostic = 'ready';
+    else if (room && players.length > 0) this.diagnostic = missingShoulder ? 'no_shoulders' : anyHold ? 'holding' : missingWrist ? 'no_wrist' : 'hand_not_raised';
+    return matched;
   }
   adapt(players: TrackedPlayer[], time: number): boolean {
     if (!Number.isFinite(time) || this.lastTime !== null && time < this.lastTime) {
+      this.diagnostic = 'clock_invalid';
       this.samples.forEach(invalidate);
       return false;
     }
@@ -100,8 +115,18 @@ export class Calibration {
     this.lastTime = time;
     const present = new Set(players.map(player => player.id));
     const replacement = players.some(player => !this.samples.has(player.id));
-    for (const [id, sample] of this.samples) if (time - sample.seen > 500 || replacement && !present.has(id)) invalidate(sample);
+    let reason = 'ok';
+    for (const [id, sample] of this.samples) {
+      if (time - sample.seen > 500) {
+        if (sample.ready) reason = 'timeout_500ms';
+        invalidate(sample);
+      } else if (replacement && !present.has(id)) {
+        if (sample.ready) reason = 'id_replaced';
+        invalidate(sample);
+      }
+    }
     if (!separated(players)) {
+      this.diagnostic = 'not_separated';
       for (const player of players) {
         const sample = this.samples.get(player.id);
         if (sample) invalidate(sample);
@@ -112,25 +137,38 @@ export class Calibration {
       const sample = this.samples.get(player.id);
       if (!sample?.ready || sample.invalidated) continue;
       if (players.filter(item => item.id === player.id).length !== 1) {
+        reason = 'duplicate_id';
         invalidate(sample);
         continue;
       }
       const next = signature(player);
-      if (!next) continue;
+      if (!next) {
+        reason = 'no_shoulders';
+        continue;
+      }
       const previous = sample.signature;
-      const elapsed = time - sample.seen;
+      const elapsed = (sample.suspendedAt ?? time) - sample.seen;
       const ratio = next.width / previous.width;
       const scaleLimit = 1.08 + Math.min(0.12, elapsed * 0.00024);
       const motionLimit = Math.max(0.025, previous.width * 0.25) + Math.min(0.04, elapsed * 0.00008);
       const expectedHeight = previous.height === null ? null : previous.height * ratio;
       const heightRatio = expectedHeight && next.height ? next.height / expectedHeight : 1;
-      if (ratio < 1 / scaleLimit || ratio > scaleLimit || heightRatio < 0.65 || heightRatio > 1.5 || Math.hypot(next.center.x - previous.center.x, next.center.y - previous.center.y) > motionLimit) {
+      const displacement = Math.hypot(next.center.x - previous.center.x, next.center.y - previous.center.y);
+      if (!sameReach(sample, player) || displacement > 0.18) {
+        reason = 'hard_jump';
         invalidate(sample);
         continue;
       }
+      if (ratio < 1 / scaleLimit || ratio > scaleLimit || heightRatio < 0.65 || heightRatio > 1.5 || displacement > motionLimit) {
+        reason = displacement > motionLimit ? 'soft_motion_jitter' : 'soft_scale_jitter';
+        sample.suspendedAt ??= time;
+        continue;
+      }
+      sample.suspendedAt = null;
       sample.signature = { ...next, height: next.height ?? expectedHeight };
       sample.seen = time;
     }
+    this.diagnostic = reason;
     return this.matches(players);
   }
   matches(players: TrackedPlayer[]) {
@@ -140,10 +178,10 @@ export class Calibration {
     if (!separated(players)) return [];
     return players.filter(player => {
       const sample = this.samples.get(player.id);
-      return sample?.ready && sameReach(sample, player) && validLandmark(player.landmarks[11]) && validLandmark(player.landmarks[12]);
+      return sample?.ready && sample.suspendedAt === null && sameReach(sample, player) && validLandmark(player.landmarks[11]) && validLandmark(player.landmarks[12]);
     });
   }
-  readyCount() { return [...this.samples.values()].filter(sample => sample.ready).length; }
+  readyCount() { return [...this.samples.values()].filter(sample => sample.ready && sample.suspendedAt === null).length; }
   zones(players: TrackedPlayer[], gentle: boolean, compact = false): ReachZone[] {
     if (!this.matches(players)) throw new Error('需要先完成每位玩家的校准');
     return players.map(player => {

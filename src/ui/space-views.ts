@@ -1,4 +1,5 @@
 import type { SpaceMode, SpacePreference } from '../game/space.ts';
+export type { SpaceMode, SpacePreference };
 
 export function spaceLabel(mode: SpaceMode) {
   return mode === 'compact' ? '小客厅 · 小幅动作' : '舒展空间 · 自动跟随';

@@ -56,7 +56,7 @@ export class MediaPipeModelFactory implements ModelFactory {
       baseOptions: { modelAssetPath: qualityProfile(config.quality).modelPath, delegate },
       canvas,
       runningMode: 'VIDEO',
-      numPoses: config.numPoses,
+      numPoses: Math.max(4, config.numPoses),
       minPoseDetectionConfidence: 0.5,
       minPosePresenceConfidence: 0.5,
       minTrackingConfidence: 0.5,

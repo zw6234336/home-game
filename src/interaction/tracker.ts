@@ -2,9 +2,10 @@ import type { Landmark, Point, PoseObservation, TrackedPlayer } from '../types.t
 import { OneEuroFilter } from './filter.ts';
 import { validLandmark } from './geometry.ts';
 
-type Candidate = { center: Point; shoulderWidth: number; bodyWidth: number | null; torsoHeight: number | null; confidence: number; landmarks: Landmark[] };
+type BodyAnchors = { shoulders: Point | null; hips: Point | null };
+type Candidate = { center: Point; anchors: BodyAnchors; shoulderWidth: number; bodyWidth: number | null; torsoHeight: number | null; confidence: number; landmarks: Landmark[] };
 type WristState = { x: OneEuroFilter; y: OneEuroFilter; raw: Point | null; lastAt: number | null };
-type Track = { id: number; center: Point; velocity: Point; shoulderWidth: number; bodyWidth: number | null; torsoHeight: number | null; lastSeen: number; observations: number; wrists: [WristState, WristState] };
+type Track = { id: number; center: Point; anchors: BodyAnchors; velocity: Point; shoulderWidth: number; bodyWidth: number | null; torsoHeight: number | null; lastSeen: number; observations: number; wrists: [WristState, WristState] };
 
 const torsoIndices = [11, 12, 23, 24];
 const wristIndices = [15, 16] as const;
@@ -49,6 +50,7 @@ function candidateFor(pose: PoseObservation): Candidate | null {
   const width = shouldersValid ? distance(landmarks[11], landmarks[12]) : hipsValid ? distance(landmarks[23], landmarks[24]) * 1.2 : 0.18;
   return {
     center,
+    anchors: { shoulders, hips },
     shoulderWidth: Math.max(0.04, width),
     bodyWidth: shouldersValid && width >= 0.04 ? width : null,
     torsoHeight: shoulders && hips && distance(shoulders, hips) >= 0.04 ? distance(shoulders, hips) : null,
@@ -77,22 +79,32 @@ function copyPlayer(player: TrackedPlayer): TrackedPlayer {
   };
 }
 
+function commonAnchors(first: BodyAnchors, second: BodyAnchors): [Point, Point] | null {
+  for (const key of ['shoulders', 'hips'] as const) {
+    if (first[key] && second[key]) return [first[key], second[key]];
+  }
+  return null;
+}
+
 function matchingCost(track: Track, candidate: Candidate, time: number): number | null {
+  const anchors = commonAnchors(track.anchors, candidate.anchors);
+  if (!anchors) return null;
   const scaleChanged = (previous: number | null, current: number | null): boolean => previous !== null && current !== null && Math.max(previous, current) > Math.min(previous, current) * 1.8;
   if (scaleChanged(track.bodyWidth, candidate.bodyWidth) || scaleChanged(track.torsoHeight, candidate.torsoHeight)) {
     return null;
   }
   const elapsed = (time - track.lastSeen) / 1000;
-  const displacement = distance(track.center, candidate.center);
+  const [previous, current] = anchors;
+  const displacement = distance(previous, current);
   const limit = Math.min(0.45, Math.max(0.14, Math.max(track.shoulderWidth, candidate.shoulderWidth) * 1.2) + elapsed * 0.8);
   if (displacement > limit) {
     return null;
   }
   const predictionSeconds = Math.min(elapsed, 0.15);
-  const predicted = { x: track.center.x + track.velocity.x * predictionSeconds, y: track.center.y + track.velocity.y * predictionSeconds };
+  const predicted = { x: previous.x + track.velocity.x * predictionSeconds, y: previous.y + track.velocity.y * predictionSeconds };
   const scalePenalty = Math.abs(Math.log(candidate.shoulderWidth / track.shoulderWidth)) * 0.05;
   const torsoPenalty = candidate.torsoHeight !== null && track.torsoHeight !== null ? Math.abs(candidate.torsoHeight - track.torsoHeight) * 0.15 : 0;
-  return distance(predicted, candidate.center) + displacement * 0.05 + scalePenalty + torsoPenalty;
+  return distance(predicted, current) + displacement * 0.05 + scalePenalty + torsoPenalty;
 }
 
 function matchAll(tracks: Track[], candidates: Candidate[], time: number): Map<number, number> {
@@ -176,6 +188,7 @@ export class PlayerTracker {
       const track: Track = {
         id: this.nextId,
         center: candidate.center,
+        anchors: candidate.anchors,
         velocity: { x: 0, y: 0 },
         shoulderWidth: candidate.shoulderWidth,
         bodyWidth: candidate.bodyWidth,
@@ -205,7 +218,8 @@ export class PlayerTracker {
 
   private observe(track: Track, candidate: Candidate, timestamp: number): TrackedPlayer {
     const elapsed = timestamp - track.lastSeen;
-    const centerShift = { x: candidate.center.x - track.center.x, y: candidate.center.y - track.center.y };
+    const anchors = commonAnchors(track.anchors, candidate.anchors);
+    const centerShift = anchors ? { x: anchors[1].x - anchors[0].x, y: anchors[1].y - anchors[0].y } : { x: 0, y: 0 };
     const wrists = wristIndices.map((index, side) => {
       const state = track.wrists[side];
       const landmark = candidate.landmarks[index];
@@ -239,6 +253,7 @@ export class PlayerTracker {
       track.velocity = { x: 0, y: 0 };
     }
     track.center = candidate.center;
+    track.anchors = candidate.anchors;
     track.shoulderWidth = candidate.shoulderWidth;
     track.bodyWidth = candidate.bodyWidth ?? track.bodyWidth;
     track.torsoHeight = candidate.torsoHeight ?? track.torsoHeight;

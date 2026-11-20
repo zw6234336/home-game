@@ -5,11 +5,17 @@
 .game-choice-mark { color: #8d7da9; font-size: 22px; font-weight: 800; }
 .game-choices button[aria-pressed=true] { background: #eae4f6; border-color: #aa9ac7; box-shadow: inset 0 0 0 1px #aa9ac7; }
 .game-choices #game-poses[aria-pressed=true] { background: #e2efe7; border-color: #7eb59f; box-shadow: inset 0 0 0 1px #7eb59f; }
+.game-choices #game-hearts[aria-pressed=true] { background: #fae6e3; border-color: #e49184; box-shadow: inset 0 0 0 1px #e49184; }
 .game-library .feature-scene { min-height: 385px; height: clamp(385px, 50vh, 540px); }
 .pose-feature { background: #dceee5; }
 .pose-feature .feature-heading small { color: #4f7966; }
 .pose-feature .scene-labels span { border-color: #afcdbd; color: #4a6d5e; }
 .pose-feature .feature-hint { top: 32%; right: 30px; }
+.hearts-feature { background: #f9e3e8; }
+.hearts-feature .feature-heading small { color: #9c4a5e; }
+.hearts-feature .scene-labels span { border-color: #deb4bf; color: #7e3d4f; }
+.hearts-feature .feature-hint { top: 34%; right: 26px; }
+.hearts-stage { background: #f7e6ee; }
 .pose-layout { display: grid; grid-template-columns: minmax(240px, .42fr) 1fr; gap: 22px; height: clamp(345px, 51vh, 560px); }
 .pose-card { background: #e2efe7; border: 1px solid #c7dfd0; border-radius: 24px; padding: 25px 24px 20px; display: flex; flex-direction: column; align-items: center; text-align: center; overflow: hidden; }
 .pose-card .eyebrow { font-size: 12px; letter-spacing: .06em; color: #527665; }
