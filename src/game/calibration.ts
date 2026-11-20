@@ -3,16 +3,19 @@ import { validLandmark } from '../interaction/geometry.ts';
 import { HoldGesture } from '../interaction/raise.ts';
 
 type Signature = { center: Point; width: number; height: number | null };
-type Sample = { hold: HoldGesture; ready: boolean; minX: number; maxX: number; minY: number; maxY: number; seen: number; signature: Signature };
+type Sample = { hold: HoldGesture; ready: boolean; invalidated: boolean; minX: number; maxX: number; minY: number; maxY: number; seen: number; signature: Signature };
 
-function signature(player: TrackedPlayer): Signature {
+function signature(player: TrackedPlayer): Signature | null {
   const landmarks = player.landmarks;
-  const height = [11, 12, 23, 24].every(index => validLandmark(landmarks[index])) ? Math.abs((landmarks[23].y + landmarks[24].y - landmarks[11].y - landmarks[12].y) / 2) : null;
-  return { center: { ...player.center }, width: player.shoulderWidth, height };
+  if (!Array.isArray(landmarks) || !validLandmark(landmarks[11]) || !validLandmark(landmarks[12]) || !Number.isFinite(player.shoulderWidth) || player.shoulderWidth <= 0) return null;
+  const center = { x: (landmarks[11].x + landmarks[12].x) / 2, y: (landmarks[11].y + landmarks[12].y) / 2 };
+  const measuredHeight = [23, 24].every(index => validLandmark(landmarks[index])) ? Math.abs((landmarks[23].y + landmarks[24].y) / 2 - center.y) : 0;
+  return { center, width: player.shoulderWidth, height: measuredHeight > 1e-4 ? measuredHeight : null };
 }
 
 function sameReach(sample: Sample, player: TrackedPlayer): boolean {
   const next = signature(player);
+  if (!next) return false;
   const base = sample.signature;
   const widthRatio = next.width / base.width;
   if (widthRatio < 0.7 || widthRatio > 1.4) return false;
@@ -21,29 +24,112 @@ function sameReach(sample: Sample, player: TrackedPlayer): boolean {
 }
 
 function separated(players: TrackedPlayer[]) {
-  return players.length < 2 || Math.abs(players[0].center.x - players[1].center.x) >= Math.max(0.12, (players[0].shoulderWidth + players[1].shoulderWidth) * 0.6);
+  const signatures = players.map(signature).filter((value): value is Signature => value !== null);
+  return signatures.every((first, index) => signatures.slice(index + 1).every(second => Math.abs(first.center.x - second.center.x) >= Math.max(0.12, (first.width + second.width) * 0.6)));
+}
+
+function usableWrist(point: Point | null): point is Point {
+  return point !== null && Number.isFinite(point.x) && Number.isFinite(point.y) && point.x >= 0 && point.x <= 1 && point.y >= 0 && point.y <= 1;
+}
+
+function invalidate(sample: Sample): void {
+  sample.ready = false;
+  sample.invalidated = true;
+  sample.hold.reset();
+}
+
+function clamp(value: number, minimum: number, maximum: number): number {
+  return Math.max(minimum, Math.min(maximum, value));
+}
+
+function fitInterval(minimum: number, maximum: number, lower: number, upper: number, anchor: number): [number, number] {
+  let start = clamp(minimum, lower, upper);
+  let end = clamp(maximum, lower, upper);
+  const span = Math.min(0.04, upper - lower);
+  if (end - start < span) {
+    start = clamp(anchor - span / 2, lower, upper - span);
+    end = start + span;
+  }
+  return [start, end];
 }
 
 export class Calibration {
   private samples = new Map<number, Sample>();
   private count: 1 | 2;
+  private lastTime: number | null = null;
   constructor(count: 1 | 2) { this.count = count; }
   update(players: TrackedPlayer[], time: number) {
-    if (!Number.isFinite(time)) { this.samples.clear(); return false; }
-    for (const [id, sample] of this.samples) if (!players.some(player => player.id === id) && time - sample.seen > 500) this.samples.delete(id);
+    if (!Number.isFinite(time)) { this.samples.forEach(invalidate); return false; }
+    this.lastTime = time;
+    for (const [id, sample] of this.samples) if (!players.some(player => player.id === id)) {
+      sample.hold.update(false, time);
+      if (time - sample.seen > 500) invalidate(sample);
+    }
     const room = separated(players);
     for (const player of players) {
       let sample = this.samples.get(player.id);
-      if (!sample || !sameReach(sample, player) || time < sample.seen) {
-        sample = { hold: new HoldGesture(2000), ready: false, minX: Infinity, maxX: -Infinity, minY: Infinity, maxY: -Infinity, seen: time, signature: signature(player) };
+      const next = signature(player);
+      if (!next) {
+        sample?.hold.update(false, time);
+        if (sample && time - sample.seen > 500) invalidate(sample);
+        continue;
+      }
+      if (!sample || sample.invalidated || !sameReach(sample, player) || time < sample.seen || time - sample.seen > 500) {
+        sample = { hold: new HoldGesture(2000), ready: false, invalidated: false, minX: Infinity, maxX: -Infinity, minY: Infinity, maxY: -Infinity, seen: time, signature: next };
         this.samples.set(player.id, sample);
       }
       sample.seen = time;
-      if (sample.hold.update(room && player.raised && validLandmark(player.landmarks[11]) && validLandmark(player.landmarks[12]), time)) sample.ready = true;
-      for (const wrist of player.wrists) if (wrist) {
-        sample.minX = Math.min(sample.minX, wrist.x); sample.maxX = Math.max(sample.maxX, wrist.x);
-        sample.minY = Math.min(sample.minY, wrist.y); sample.maxY = Math.max(sample.maxY, wrist.y);
+      sample.signature = { ...next, height: next.height ?? sample.signature.height };
+      const wrists = player.wrists.filter(usableWrist);
+      if (sample.hold.update(room && player.raised && wrists.length > 0, time)) sample.ready = true;
+      for (const wrist of wrists) {
+        const x = (wrist.x - next.center.x) / next.width;
+        const y = (wrist.y - next.center.y) / next.width;
+        sample.minX = Math.min(sample.minX, x); sample.maxX = Math.max(sample.maxX, x);
+        sample.minY = Math.min(sample.minY, y); sample.maxY = Math.max(sample.maxY, y);
       }
+    }
+    return this.matches(players);
+  }
+  adapt(players: TrackedPlayer[], time: number): boolean {
+    if (!Number.isFinite(time) || this.lastTime !== null && time < this.lastTime) {
+      this.samples.forEach(invalidate);
+      return false;
+    }
+    if (time === this.lastTime) return this.matches(players);
+    this.lastTime = time;
+    const present = new Set(players.map(player => player.id));
+    const replacement = players.some(player => !this.samples.has(player.id));
+    for (const [id, sample] of this.samples) if (time - sample.seen > 500 || replacement && !present.has(id)) invalidate(sample);
+    if (!separated(players)) {
+      for (const player of players) {
+        const sample = this.samples.get(player.id);
+        if (sample) invalidate(sample);
+      }
+      return false;
+    }
+    for (const player of players) {
+      const sample = this.samples.get(player.id);
+      if (!sample?.ready || sample.invalidated) continue;
+      if (players.filter(item => item.id === player.id).length !== 1) {
+        invalidate(sample);
+        continue;
+      }
+      const next = signature(player);
+      if (!next) continue;
+      const previous = sample.signature;
+      const elapsed = time - sample.seen;
+      const ratio = next.width / previous.width;
+      const scaleLimit = 1.08 + Math.min(0.12, elapsed * 0.00024);
+      const motionLimit = Math.max(0.025, previous.width * 0.25) + Math.min(0.04, elapsed * 0.00008);
+      const expectedHeight = previous.height === null ? null : previous.height * ratio;
+      const heightRatio = expectedHeight && next.height ? next.height / expectedHeight : 1;
+      if (ratio < 1 / scaleLimit || ratio > scaleLimit || heightRatio < 0.65 || heightRatio > 1.5 || Math.hypot(next.center.x - previous.center.x, next.center.y - previous.center.y) > motionLimit) {
+        invalidate(sample);
+        continue;
+      }
+      sample.signature = { ...next, height: next.height ?? expectedHeight };
+      sample.seen = time;
     }
     return this.matches(players);
   }
@@ -58,25 +144,34 @@ export class Calibration {
     });
   }
   readyCount() { return [...this.samples.values()].filter(sample => sample.ready).length; }
-  zones(players: TrackedPlayer[], gentle: boolean): ReachZone[] {
+  zones(players: TrackedPlayer[], gentle: boolean, compact = false): ReachZone[] {
     if (!this.matches(players)) throw new Error('需要先完成每位玩家的校准');
     return players.map(player => {
       const sample = this.samples.get(player.id)!;
       if (!Number.isFinite(sample.minX)) throw new Error('需要先记录有效的伸手范围');
-      const shoulderY = (player.landmarks[11].y + player.landmarks[12].y) / 2;
-      const half = Math.max(0.04, player.shoulderWidth * 0.5);
-      let minX = Math.max(0.04, Math.min(sample.minX, player.center.x - half));
-      let maxX = Math.min(0.96, Math.max(sample.maxX, player.center.x + half));
+      const { center, width } = sample.signature;
+      const half = Math.max(0.04, width * 0.5);
+      let left = 0.04;
+      let right = 0.96;
       if (players.length === 2) {
-        const other = players.find(item => item.id !== player.id)!;
-        const boundary = (player.center.x + other.center.x) / 2;
-        if (player.center.x < other.center.x) maxX = Math.min(maxX, boundary - 0.02);
-        else minX = Math.max(minX, boundary + 0.02);
+        const other = this.samples.get(players.find(item => item.id !== player.id)!.id)!.signature.center;
+        const boundary = (center.x + other.x) / 2;
+        if (center.x < other.x) {
+          right = Math.min(right, boundary - 0.02);
+          if (right <= left) left = 0;
+        } else {
+          left = Math.max(left, boundary + 0.02);
+          if (left >= right) right = 1;
+        }
       }
-      const minY = Math.max(0.06, Math.min(sample.minY, shoulderY));
-      const maxY = Math.min(0.9, Math.max(sample.maxY, shoulderY + half));
+      const [minX, maxX] = fitInterval(Math.min(center.x + sample.minX * width, center.x - half), Math.max(center.x + sample.maxX * width, center.x + half), left, right, center.x);
+      const [minY, maxY] = fitInterval(Math.min(center.y + sample.minY * width, center.y), Math.max(center.y + sample.maxY * width, center.y + half), 0.06, 0.9, center.y);
       const lower = gentle ? minY + (maxY - minY) * 0.28 : minY;
-      return { playerId: player.id, x: minX, y: lower, width: Math.max(0.04, maxX - minX), height: Math.max(0.04, maxY - lower) };
+      const zone = { playerId: player.id, x: minX, y: lower, width: maxX - minX, height: maxY - lower };
+      if (!compact) return zone;
+      const compactWidth = Math.min(zone.width, Math.max(0.02, width * 1.2));
+      const compactHeight = Math.min(zone.height, Math.max(0.02, width * 0.8));
+      return { playerId: player.id, x: clamp(center.x - compactWidth / 2, zone.x, zone.x + zone.width - compactWidth), y: clamp(center.y - compactHeight * 0.45, zone.y, zone.y + zone.height - compactHeight), width: compactWidth, height: compactHeight };
     });
   }
 }

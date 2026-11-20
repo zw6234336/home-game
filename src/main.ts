@@ -9,6 +9,8 @@ import { PlayerTracker } from './interaction/tracker.ts';
 import { PlayerHold } from './game/player-hold.ts';
 import { validLandmark } from './interaction/geometry.ts';
 import { Calibration } from './game/calibration.ts';
+import { chooseSpaceMode } from './game/space.ts';
+import { FramingController } from './interaction/framing.ts';
 import { createRound, hit, miss, pauseRound, resumeRound, endRound, advanceRound } from './game/round.ts';
 import { BubbleField, type HandPoint } from './game/field.ts';
 import { PoseSession } from './game/pose-session.ts';
@@ -20,13 +22,14 @@ import { icon } from './ui/icons.mjs';
 import { homeView, deviceView, calibrationView, gameView, resultsView, helpView, escapeHtml, type ViewState } from './ui/screens.ts';
 
 type Page = 'home' | 'device' | 'calibration' | 'game' | 'results';
-const state: ViewState = { players: 2, gentle: true, quality: 'quality', round: createRound(), mode: 'live', fine: false, game: 'bubbles', pose: null };
+const state: ViewState = { players: 2, gentle: true, quality: 'quality', round: createRound(), mode: 'live', fine: false, game: 'bubbles', pose: null, spacePreference: 'auto', spaceMode: 'standard' };
 const main = document.querySelector<HTMLElement>('#main')!;
 const modal = document.querySelector<HTMLDialogElement>('#modal')!;
 const content = document.querySelector<HTMLElement>('#modal-content')!;
 const sound = new Sound();
 const metrics = new Metrics();
 const navigation = new GestureNavigation();
+const framing = new FramingController();
 let page: Page = 'home';
 let stage: Stage | null = null;
 let field: BubbleField | null = null;
@@ -70,15 +73,24 @@ const pipeline = new VisionPipeline({
     latest = frame;
     players = tracker.update(frame.poses, frame.capturedAt);
     metrics.inference(frame.inferenceMs, now - frame.capturedAt);
+    if (page === 'calibration' || page === 'game') stage?.setFraming(framing.update(players, frame.capturedAt));
     if (page === 'calibration') {
-      calibrated = calibration.update(players, frame.capturedAt);
-      setText('calibration-status', calibrated ? '站好啦！轻松伸伸手，再指向开始按钮' : '已准备 ' + calibration.readyCount() + ' / ' + state.players + ' 人 · 举手保持 2 秒');
+      calibrated = calibrated ? calibration.adapt(players, frame.capturedAt) : calibration.update(players, frame.capturedAt);
+      syncSpaceMode();
+      setText('calibration-status', calibrated ? '记住你们啦！位置会自动跟随，可以开始了' : '已准备 ' + calibration.readyCount() + ' / ' + state.players + ' 人 · 肩旁举手 2 秒');
       const progress = document.querySelector<HTMLProgressElement>('#calibration-progress');
       if (progress) progress.value = calibration.readyCount();
       setDisabled('start-round', !calibrated);
     }
+    if (page === 'game') {
+      calibration.adapt(players, frame.capturedAt);
+      if (calibration.matches(players)) {
+        zones = calibration.zones(players, state.gentle, state.spaceMode === 'compact');
+        field?.setZones(zones);
+      }
+    }
     if (page === 'game' && state.game === 'poses' && phase() === 'playing' && !countdown && !modal.open) {
-      pose?.update(calibration.verifiedPlayers(players), frame.capturedAt, camera.video.videoWidth * crop.width / (camera.video.videoHeight * crop.height));
+      pose?.update(calibration.verifiedPlayers(players), frame.capturedAt, sourceAspect());
       syncPoseState();
     }
     if (page === 'game' && state.game === 'bubbles' && phase() === 'playing' && !countdown && !modal.open && readyToPlay(now)) {
@@ -91,12 +103,17 @@ const pipeline = new VisionPipeline({
       if (stage) field?.hands(hands, frame.capturedAt, stage.fit);
       if (pauseGesture.update(players, frame.capturedAt)) pause('歇一下，快乐不赶时间。');
     } else pauseGesture.reset();
-    if (page !== 'game' || modal.open) navigation.update(players, frame, now);
-    else if (state.game === 'poses') navigation.update(players, frame, now, ['pause']);
+    if (page !== 'game' || modal.open) navigation.update(players, frame, now, undefined, sourceAspect());
+    else if (state.game === 'poses') navigation.update(players, frame, now, ['pause'], sourceAspect());
   }
 });
 
 function setText(id: string, text: string) { const el = document.getElementById(id); if (el && el.textContent !== text) el.textContent = text; }
+function sourceAspect() { return camera.video.videoHeight ? camera.video.videoWidth * crop.width / (camera.video.videoHeight * crop.height) : 1; }
+function syncSpaceMode() {
+  state.spaceMode = state.mode === 'demo' ? (state.spacePreference === 'compact' ? 'compact' : 'standard') : chooseSpaceMode(players, state.spacePreference, sourceAspect());
+  setText('space-status', state.spacePreference === 'auto' ? '自动适应 · ' + (state.spaceMode === 'compact' ? '已选小幅动作，半身也能玩' : '空间合适，位置会自动跟随') : '小客厅 · 手肘靠近身体就好');
+}
 function phase() { return state.game === 'poses' ? state.pose?.phase ?? 'paused' : state.round.phase; }
 function syncPoseState() {
   if (!pose) return;
@@ -110,8 +127,8 @@ function updatePosePresentation() {
   if (!state.pose) return;
   syncPoseView(state.pose, demoPoseActive, state.mode === 'demo');
   if (state.mode === 'demo') {
-    const key = state.pose.target + '/' + demoPoseActive.join('/');
-    if (key !== poseArt) { poseArt = key; stage?.setIllustration(poseScene(demoPoseActive.map(active => active ? state.pose!.target : 'rest'))); }
+    const key = state.pose.spaceMode + '/' + state.pose.target + '/' + demoPoseActive.join('/');
+    if (key !== poseArt) { poseArt = key; stage?.setIllustration(poseScene(demoPoseActive.map(active => active ? state.pose!.target : 'rest'), state.pose.spaceMode)); }
   }
 }
 function setDisabled(id: string, value: boolean) { const el = document.getElementById(id) as HTMLButtonElement | null; if (el) el.disabled = value; }
@@ -132,7 +149,7 @@ function show(next: Page) {
   main.dataset.game = state.game;
   main.focus({ preventScroll: true });
   const canvas = document.querySelector<HTMLCanvasElement>('#stage');
-  stage = canvas ? new Stage(canvas, state.game === 'poses' ? { illustration: poseScene(Array.from({ length: state.players }, () => 'rest')), opacity: 1, background: '#dceee5' } : undefined) : null;
+  stage = canvas ? new Stage(canvas, state.game === 'poses' ? { illustration: poseScene(Array.from({ length: state.players }, () => 'rest'), state.spaceMode), opacity: 1, background: '#dceee5' } : undefined) : null;
   poseArt = '';
   if (canvas) {
     const pointer = (event: PointerEvent | MouseEvent) => {
@@ -172,7 +189,7 @@ async function listDevices() {
     select.value = camera.settings.deviceId ?? '';
   } catch { setStatus('无法列出摄像头，仍可使用已连接设备。'); }
 }
-function clearTracking() { latest = null; players = []; tracker.reset(); navigation.reset(); calibrated = false; calibration = new Calibration(state.players); field?.clearTrails(); pauseGesture.reset(); }
+function clearTracking() { latest = null; players = []; tracker.reset(); framing.reset(); navigation.reset(); calibrated = false; calibration = new Calibration(state.players); field?.clearTrails(); pauseGesture.reset(); }
 async function connect(deviceId?: string) {
   const token = ++operation;
   connecting = true; pipeline.stop(); visionReady = false; clearTracking(); crop = { x: 0, y: 0, width: 1, height: 1 };
@@ -200,14 +217,15 @@ async function startVision() {
   finally { if (token === operation) { connecting = false; syncDevice(); } }
 }
 function stopCamera() { operation++; connecting = false; pipeline.stop(); camera.stop(); visionReady = false; clearTracking(); }
-function enterCalibration() { calibration = new Calibration(state.players); calibrated = false; demoCalibrate = 0; show('calibration'); }
+function enterCalibration() { calibration = new Calibration(state.players); framing.reset(); calibrated = false; demoCalibrate = 0; syncSpaceMode(); show('calibration'); syncSpaceMode(); }
 function readyToPlay(now: number) { return state.mode === 'demo' || !!latest && now - latest.capturedAt <= 150 && zones.length === state.players && calibration.matches(players) && zones.every(zone => players.some(player => player.id === zone.playerId && (state.game === 'poses' || player.wrists.some(Boolean)))); }
 function startRound() {
   if (!calibrated || state.mode === 'live' && (!latest || performance.now() - latest.capturedAt > 150)) return;
-  zones = state.mode === 'demo' ? Array.from({ length: state.players }, (_, index) => ({ playerId: index + 1, x: state.players === 2 ? index * 0.45 + 0.06 : 0.15, y: state.gentle ? 0.42 : 0.2, width: state.players === 2 ? 0.35 : 0.7, height: state.gentle ? 0.4 : 0.64 })) : calibration.zones(players, state.gentle);
+  syncSpaceMode();
+  zones = state.mode === 'demo' ? Array.from({ length: state.players }, (_, index) => ({ playerId: index + 1, x: state.players === 2 ? index * 0.45 + 0.06 : 0.15, y: state.gentle ? 0.42 : 0.2, width: state.players === 2 ? 0.35 : 0.7, height: state.gentle ? 0.4 : 0.64 })) : calibration.zones(players, state.gentle, state.spaceMode === 'compact');
   state.round = pauseRound(createRound());
   if (state.game === 'poses') {
-    pose = new PoseSession(zones.map(zone => zone.playerId), state.gentle); pose.pause(); poseIndex = -1; poseScore = 0; syncPoseState();
+    pose = new PoseSession(zones.map(zone => zone.playerId), state.gentle, state.spaceMode); pose.pause(); poseIndex = -1; poseScore = 0; syncPoseState();
   } else { pose = null; state.pose = null; }
   show('game');
   if (state.game === 'bubbles') field = new BubbleField(zones, state.gentle, id => { const next = hit(state.round, id); if (next === state.round) return false; state.round = next; sound.pop(next.combo); return true; }, () => state.round = miss(state.round));
@@ -218,10 +236,10 @@ function pause(reason: string) {
   if (state.game === 'poses') { pose?.pause(); syncPoseState(); updatePosePresentation(); } else state.round = pauseRound(state.round);
   countdown = 0; field?.clearTrails();
   const poses = state.game === 'poses';
-  dialog('pause', '<span class="pause-art" aria-hidden="true"><i></i><i></i></span><h2 id="pause-title">' + escapeHtml(reason) + '</h2><p>时间和得分都为你保留着。<span id="resume-hint"></span></p><button id="resume" class="button primary full" data-action="resume">' + (poses ? '继续我们的模仿秀' : '继续拍泡泡') + '</button>' + (poses ? '<button id="skip-pose" class="button secondary full" data-action="skip-pose"' + (state.pose?.stage === 'celebrate' ? ' disabled' : '') + '>换个动作，不扣分</button>' : '') + '<button class="button secondary full" data-action="recalibrate">' + (poses ? '重新站好，开始新一局' : '重新站好位置') + '</button><button id="finish" class="button quiet full" data-action="finish" data-close-modal>结束这一局，看看成绩</button>');
+  dialog('pause', '<span class="pause-art" aria-hidden="true"><i></i><i></i></span><h2 id="pause-title">' + escapeHtml(reason) + '</h2><p>时间和得分都为你保留着。<span id="resume-hint"></span></p><button id="resume" class="button primary full" data-action="resume">' + (poses ? '继续我们的模仿秀' : '继续拍泡泡') + '</button>' + (poses ? '<button id="skip-pose" class="button secondary full" data-action="skip-pose"' + (state.pose?.stage === 'celebrate' ? ' disabled' : '') + '>换个动作，不扣分</button>' : '') + '<button class="button secondary full" data-action="recalibrate">' + (poses ? '重新打招呼，开始新一局' : '重新确认伙伴') + '</button><button id="finish" class="button quiet full" data-action="finish" data-close-modal>结束这一局，看看成绩</button>');
 }
 function resume() {
-  if (!readyToPlay(performance.now())) { toast('请回到原来位置。若换了站位，请重新校准。'); return; }
+  if (!readyToPlay(performance.now())) { toast('请让肩膀和小手入镜。换人或离开较久后，重新打个招呼。'); return; }
   closeDialog(); field?.clearTrails(); countdown = 3000; lostSince = 0;
   document.getElementById('countdown')!.hidden = false;
 }
@@ -237,6 +255,16 @@ function exitHome() {
 
 async function action(name: string) {
   switch (name) {
+    case 'space-auto': case 'space-compact': {
+      if (page !== 'home' && page !== 'calibration') break;
+      const preference = name === 'space-compact' ? 'compact' : 'auto';
+      if (preference === state.spacePreference) break;
+      state.spacePreference = preference;
+      syncSpaceMode(); navigation.reset();
+      if (page === 'home') show('home');
+      else for (const mode of ['auto', 'compact']) document.getElementById('space-' + mode)?.setAttribute('aria-pressed', String(mode === state.spacePreference));
+      break;
+    }
     case 'select-bubbles': case 'select-poses': {
       const game = name === 'select-poses' ? 'poses' : 'bubbles';
       if (page !== 'home' || state.game === game) break;
@@ -279,7 +307,7 @@ async function action(name: string) {
     case 'diagnostics': diagnostics(); break;
     case 'close-modal': if (page === 'game' && phase() === 'paused') pause('准备好，就继续快乐。'); else closeDialog(); break;
     case 'disconnect': stopCamera(); show('home'); toast('摄像头已关闭。'); break;
-    case 'export': downloadDiagnostics({ version: '0.2.0', game: state.game, quality: state.quality, mode: state.mode, source: { width: camera.video.videoWidth, height: camera.video.videoHeight, frameRate: camera.settings.frameRate }, metrics: metrics.snapshot(performance.now()), pipeline: pipeline.stats }); break;
+    case 'export': downloadDiagnostics({ version: '0.3.0', game: state.game, quality: state.quality, mode: state.mode, spacePreference: state.spacePreference, spaceMode: state.spaceMode, source: { width: camera.video.videoWidth, height: camera.video.videoHeight, frameRate: camera.settings.frameRate }, metrics: metrics.snapshot(performance.now()), pipeline: pipeline.stats }); break;
     case 'sound': sound.enabled = !sound.enabled; await sound.unlock(); updateToolbar(); break;
     case 'fullscreen': try { if (document.fullscreenElement) await document.exitFullscreen(); else await document.documentElement.requestFullscreen(); } catch { toast('首次全屏请点击屏幕上的全屏按钮，或按浏览器 F11。'); } break;
   }
@@ -309,6 +337,7 @@ const clock = frameLoop((now, delta) => {
   metrics.render(now);
   const fresh = state.mode === 'live' && latest && now - latest.capturedAt <= 150;
   if (!fresh) navigation.suspend();
+  if (stage && state.mode === 'live' && latest && now - latest.capturedAt > 500) { framing.reset(); stage.setFraming({ x: 0, y: 0, width: 1, height: 1 }); }
   if (stage) stage.draw(state.mode === 'live' && camera.active ? camera.video : null, crop, players, latest, field, now);
   if (page === 'calibration' && state.mode === 'live') setDisabled('start-round', !calibrated || !fresh);
   if (page === 'calibration' && demoCalibrate) {
@@ -319,7 +348,7 @@ const clock = frameLoop((now, delta) => {
   if (page === 'game') {
     const valid = readyToPlay(now);
     if (!valid) { lostSince ||= now; field?.clearTrails(); } else lostSince = 0;
-    if (lostSince && now - lostSince >= 1000 && !modal.open) pause('暂时没看清小手，请回到原来位置。');
+    if (lostSince && now - lostSince >= 1000 && !modal.open) pause('暂时没看清伙伴，先轻松歇一下。');
     if (delta > 250 && !modal.open && !countdown && phase() === 'playing') pause('画面刚才停了一下，准备好再继续。');
     if (countdown && !modal.open) {
       if (valid) countdown = Math.max(0, countdown - Math.min(delta, 100));
@@ -331,17 +360,17 @@ const clock = frameLoop((now, delta) => {
     } else if (!modal.open && phase() === 'playing') {
       if (state.game === 'poses') {
         if (valid) {
-          if (state.mode === 'demo' && state.pose) pose?.update(demoPosePlayers(state.pose.players.map(player => player.id), state.pose.target, demoPoseActive), now, 1);
+          if (state.mode === 'demo' && state.pose) pose?.update(demoPosePlayers(state.pose.players.map(player => player.id), state.pose.target, demoPoseActive, state.pose.spaceMode), now, 1);
           pose?.advance(delta); syncPoseState();
         }
-      } else {
+      } else if (valid) {
         state.round = advanceRound(state.round, delta);
         if (stage) field?.update(delta, stage.fit);
       }
       if (phase() === 'results') finish();
     }
-    if (dialogKind === 'pause') { setDisabled('resume', !valid); setText('resume-hint', valid ? '' : ' 请回到原位；换人或换位置需要重新校准。'); }
-    setText('tracking-hint', !valid && !modal.open ? '看向摄像头，让小手回到画面里' : '');
+    if (dialogKind === 'pause') { setDisabled('resume', !valid); setText('resume-hint', valid ? '' : ' 请让肩膀和小手入镜；换人或离开较久后，重新打个招呼。'); }
+    setText('tracking-hint', !valid && !modal.open ? '暂停计时中，让肩膀和小手入镜' : '');
   }
   if (page === 'game' && state.game === 'poses' && now - poseUiTick >= 50) { poseUiTick = now; updatePosePresentation(); }
   if (now - uiTick > 150) {

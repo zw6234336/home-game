@@ -138,7 +138,7 @@ test('session validates and copies player identifiers', () => {
   const session = new PoseSession(ids, true);
   ids[0] = 99;
   assert.deepEqual(session.snapshot.players.map(item => item.id), [1, 2]);
-  assert.deepEqual({ ...session.snapshot, players: [] }, { phase: 'playing', stage: 'pose', index: 0, total: 6, target: 'airplane', remainingMs: 20000, elapsedMs: 0, score: 0, completed: 0, results: [], players: [] });
+  assert.deepEqual({ ...session.snapshot, players: [] }, { spaceMode: 'standard', phase: 'playing', stage: 'pose', index: 0, total: 6, target: 'airplane', remainingMs: 20000, elapsedMs: 0, score: 0, completed: 0, results: [], players: [] });
 });
 
 test('gentle and standard holds use capture time without advancing round time', () => {

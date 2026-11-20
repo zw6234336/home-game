@@ -1,10 +1,12 @@
 import type { TrackedPlayer } from '../types.ts';
 import { evaluatePose, POSE_CHALLENGES } from './pose-match.ts';
 import type { PoseId } from './pose-match.ts';
+import type { SpaceMode } from './space.ts';
 
 export type PosePlayerState = { id: number; progress: number; ready: boolean; matched: boolean; hint: string };
 export type PoseResult = { id: PoseId; status: 'matched' | 'timeout' | 'skipped'; score: 0 | 100 };
 export type PoseSnapshot = {
+  spaceMode: SpaceMode;
   phase: 'playing' | 'paused' | 'results';
   stage: 'pose' | 'celebrate';
   index: number;
@@ -21,6 +23,7 @@ export type PoseSnapshot = {
 type PlayerState = PosePlayerState & { startedAt: number | null };
 
 export class PoseSession {
+  private readonly spaceMode: SpaceMode;
   private readonly gentle: boolean;
   private readonly holdMs: number;
   private readonly questionMs: number;
@@ -36,10 +39,11 @@ export class PoseSession {
   private players: PlayerState[];
   private lastAt: number | null = null;
 
-  constructor(playerIds: number[], gentle: boolean) {
+  constructor(playerIds: number[], gentle: boolean, spaceMode: SpaceMode = 'standard') {
     if (!Array.isArray(playerIds) || playerIds.length < 1 || playerIds.length > 2 || playerIds.some(id => !Number.isInteger(id) || id <= 0) || new Set(playerIds).size !== playerIds.length) throw new RangeError('A session requires one or two unique positive integer player IDs');
     if (typeof gentle !== 'boolean') throw new TypeError('Gentle mode must be a boolean');
     this.gentle = gentle;
+    this.spaceMode = spaceMode;
     this.holdMs = gentle ? 1000 : 1400;
     this.questionMs = gentle ? 20000 : 16000;
     this.remainingMs = this.questionMs;
@@ -48,6 +52,7 @@ export class PoseSession {
 
   get snapshot(): PoseSnapshot {
     return {
+      spaceMode: this.spaceMode,
       phase: this.phase,
       stage: this.stage,
       index: this.index,
@@ -74,7 +79,7 @@ export class PoseSession {
         player.hint = '请回到画面里，和同伴一起完成';
         continue;
       }
-      const result = evaluatePose(POSE_CHALLENGES[this.index].id, matches[0].landmarks, this.gentle, aspectRatio);
+      const result = evaluatePose(POSE_CHALLENGES[this.index].id, matches[0].landmarks, this.gentle, aspectRatio, this.spaceMode);
       player.matched = result.matched;
       if (player.ready) {
         player.hint = '完成啦，放松一下等同伴';

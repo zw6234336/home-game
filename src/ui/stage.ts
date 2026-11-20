@@ -1,5 +1,5 @@
 import type { CropRect, Rect, TrackedPlayer, VisionFrame } from '../types.ts';
-import { fitRect, toStage, validLandmark } from '../interaction/geometry.ts';
+import { framingFit, toStage, validLandmark } from '../interaction/geometry.ts';
 import { scene } from './scene.mjs';
 import type { BubbleField } from '../game/field.ts';
 
@@ -12,6 +12,7 @@ export class Stage {
   private illustrationMarkup = '';
   private illustrationOpacity: number;
   private background: string;
+  private framing: Rect = { x: 0, y: 0, width: 1, height: 1 };
   constructor(canvas: HTMLCanvasElement, options?: { illustration: string; opacity: number; background: string }) {
     this.setIllustration(options?.illustration ?? scene(2, false));
     this.illustrationOpacity = options?.opacity ?? .14;
@@ -23,6 +24,10 @@ export class Stage {
     if (markup === this.illustrationMarkup) return;
     this.illustrationMarkup = markup;
     this.illustration.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(markup);
+  }
+  setFraming(rect: Rect) {
+    framingFit(1, 1, 1, 1, rect);
+    this.framing = { ...rect };
   }
   draw(video: HTMLVideoElement | null, crop: CropRect, players: TrackedPlayer[], frame: VisionFrame | null, field: BubbleField | null, now: number) {
     const w = this.canvas.clientWidth;
@@ -38,7 +43,7 @@ export class Stage {
     ctx.fillStyle = this.illustrationOpacity === 1 ? this.background : '#e9e2f3'; ctx.fillRect(0, 0, w, h);
     const sw = video?.videoWidth ? video.videoWidth * crop.width : 1280;
     const sh = video?.videoHeight ? video.videoHeight * crop.height : 800;
-    this.fit = fitRect(sw, sh, w, h);
+    this.fit = framingFit(sw, sh, w, h, this.framing);
     const fit = this.fit;
     if (video && video.readyState >= 2) {
       ctx.save(); ctx.translate(fit.x + fit.width, fit.y); ctx.scale(-1, 1);

@@ -1,5 +1,6 @@
 import type { Landmark, Point } from '../types.ts';
 import { validLandmark } from '../interaction/geometry.ts';
+import type { SpaceMode } from './space.ts';
 
 export type PoseId = 'airplane' | 'star' | 'cactus' | 'roof' | 'hug' | 'wave';
 export type PoseChallenge = { readonly id: PoseId; readonly name: string; readonly instruction: string; readonly shortLabel: string };
@@ -15,6 +16,15 @@ const challenges: PoseChallenge[] = [
 ];
 
 export const POSE_CHALLENGES: readonly PoseChallenge[] = Object.freeze(challenges.map(challenge => Object.freeze(challenge)));
+
+export const POSE_COMPACT_CHALLENGES: readonly PoseChallenge[] = Object.freeze([
+  { id: 'airplane', name: '小翅膀', instruction: '手肘轻轻弯着，小手放在肩旁，展开小翅膀', shortLabel: '小小翅膀' },
+  { id: 'star', name: '小星光', instruction: '手肘靠近身体，两只小手放在脸旁，亮出小星光', shortLabel: '脸旁星光' },
+  { id: 'cactus', name: '小力士', instruction: '手肘打开一点，小手向上，力气藏在小动作里', shortLabel: '小小力士' },
+  { id: 'roof', name: '小帐篷', instruction: '双手在胸前靠近，手肘朝下，搭一个小帐篷', shortLabel: '胸前帐篷' },
+  { id: 'hug', name: '抱抱熊', instruction: '双手在胸前交叉，轻轻抱抱自己，让手腕露出来', shortLabel: '交叉抱抱' },
+  { id: 'wave', name: '悄悄招手', instruction: '一只小手在脸旁打招呼，另一只手轻松放下', shortLabel: '轻轻招手' },
+].map(challenge => Object.freeze(challenge as PoseChallenge)));
 
 type Arm = { shoulder: Point; elbow: Point; wrist: Point; side: -1 | 1; angle: number };
 type Check = { passed: boolean; hint: string };
@@ -123,12 +133,47 @@ function evaluateChecks(id: PoseId, arms: [Arm, Arm], gentle: boolean): Check[] 
   return left.filter(item => item.passed).length >= right.filter(item => item.passed).length ? left : right;
 }
 
-export function evaluatePose(id: PoseId | string, landmarks: readonly Landmark[], gentle: boolean, aspectRatio = 1): PoseEvaluation {
+function compactChecks(id: PoseId, arms: [Arm, Arm], gentle: boolean): Check[] {
+  const both = (predicate: (arm: Arm) => boolean) => arms.every(predicate);
+  if (id === 'hug') return evaluateChecks(id, arms, gentle);
+  if (id === 'airplane') return [
+    check(both(arm => atLeast(arm.elbow.y, gentle ? 0.2 : 0.25)), '手肘轻轻向下，弯成小翅膀'),
+    check(both(arm => atLeast(outward(arm, arm.wrist), gentle ? 0.2 : 0.25)), '两只小手向肩旁打开一点'),
+    check(both(arm => atMost(Math.abs(arm.wrist.y), gentle ? 0.25 : 0.18)), '小手留在肩膀的高度'),
+  ];
+  const littleStar = (arm: Arm) => atMost(outward(arm, arm.elbow), gentle ? 0.28 : 0.25) && atLeast(arm.elbow.y, gentle ? 0.06 : 0.1);
+  if (id === 'star') return [
+    check(both(littleStar), '手肘靠近身体，轻轻朝下'),
+    check(both(arm => atLeast(outward(arm, arm.wrist), gentle ? 0.07 : 0.1)), '两只小手放在脸的两旁'),
+    check(both(arm => atMost(arm.wrist.y, gentle ? -0.28 : -0.3)), '小手比肩膀高一点，亮出小星光'),
+  ];
+  if (id === 'cactus') return [
+    check(both(arm => atLeast(outward(arm, arm.elbow), gentle ? 0.26 : 0.28)), '手肘向两边打开一点'),
+    check(both(arm => atMost(Math.abs(arm.elbow.y), gentle ? 0.3 : 0.25)), '手肘留在肩膀附近'),
+    check(both(arm => atLeast(arm.elbow.y - arm.wrist.y, gentle ? 0.25 : 0.3)), '把小手放在手肘上面'),
+    check(both(arm => atMost(Math.abs(arm.wrist.x - arm.elbow.x), gentle ? 0.25 : 0.18)), '小手和手肘轻轻对齐'),
+  ];
+  if (id === 'roof') return [
+    check(both(arm => atMost(arm.wrist.y, gentle ? -0.04 : -0.05)), '小手放在胸前上方，轻轻靠近'),
+    check(atMost(length(arms[0].wrist, arms[1].wrist), gentle ? 0.5 : 0.45) && both(arm => atLeast(arm.wrist.x * arm.side, 0)), '两只手靠近，不用交叉'),
+    check(both(arm => atLeast(outward(arm, arm.elbow), gentle ? 0.02 : 0.05) && atLeast(arm.elbow.y, gentle ? 0.1 : 0.15)), '手肘朝下，搭出小帐篷'),
+  ];
+  const wave = (arm: Arm, other: Arm): Check[] => [
+    check(littleStar(arm) && atLeast(outward(arm, arm.wrist), gentle ? 0.07 : 0.1), '一只小手放在脸旁，手肘靠近身体'),
+    check(atMost(arm.wrist.y, gentle ? -0.28 : -0.3), '打招呼的小手比肩膀高一点'),
+    check(atLeast(other.wrist.y, gentle ? 0.35 : 0.4), '另一只小手轻松放下来'),
+  ];
+  const left = wave(arms[0], arms[1]);
+  const right = wave(arms[1], arms[0]);
+  return left.filter(item => item.passed).length >= right.filter(item => item.passed).length ? left : right;
+}
+
+export function evaluatePose(id: PoseId | string, landmarks: readonly Landmark[], gentle: boolean, aspectRatio = 1, mode: SpaceMode = 'standard'): PoseEvaluation {
   const challenge = POSE_CHALLENGES.find(item => item.id === id);
   if (!challenge || typeof gentle !== 'boolean') return { matched: false, quality: 0, hint: '请选择一个动作，再和同伴一起试试' };
   const arms = bodyArms(landmarks, aspectRatio);
   if (!arms) return { matched: false, quality: 0, hint: '让肩膀、手肘和手腕都回到画面里' };
-  const checks = evaluateChecks(challenge.id, arms, gentle);
+  const checks = mode === 'compact' ? compactChecks(challenge.id, arms, gentle) : evaluateChecks(challenge.id, arms, gentle);
   const failed = checks.find(item => !item.passed);
   return { matched: !failed, quality: checks.filter(item => item.passed).length / checks.length, hint: failed?.hint ?? '就是这样，轻松保持一下' };
 }

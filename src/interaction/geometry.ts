@@ -24,6 +24,18 @@ export function fitRect(sw: number, sh: number, vw: number, vh: number): Rect {
   return { x: (vw - width) / 2, y: (vh - height) / 2, width, height };
 }
 
+export function framingFit(sw: number, sh: number, vw: number, vh: number, view: Rect): Rect {
+  if (!view || ![view.x, view.y, view.width, view.height].every(Number.isFinite) || view.x < 0 || view.y < 0 || view.width <= 0 || view.height <= 0 || view.x + view.width > 1 || view.y + view.height > 1) {
+    throw new RangeError('Framing requires a positive normalized rectangle inside the source');
+  }
+  const visible = fitRect(sw * view.width, sh * view.height, vw, vh);
+  const width = visible.width / view.width;
+  const height = visible.height / view.height;
+  const result = { x: visible.x - (1 - view.x - view.width) * width, y: visible.y - view.y * height, width, height };
+  if (!Object.values(result).every(Number.isFinite)) throw new RangeError('Framing projection must remain finite');
+  return result;
+}
+
 export function toStage(point: Point, rect: Rect, mirror = true): Point {
   if (!finitePoint(point) || !finitePoint(rect) || !Number.isFinite(rect.width) || !Number.isFinite(rect.height) || rect.width < 0 || rect.height < 0) {
     throw new RangeError('Projection requires finite coordinates and nonnegative dimensions');
