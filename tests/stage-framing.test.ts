@@ -47,3 +47,41 @@ test('stage applies one mirrored framing to video and overlays without changing 
   assert.throws(() => stage.setFraming({ x: 0, y: 0, width: NaN, height: 1 }), RangeError);
   assert.deepEqual(stage.fit, expected);
 });
+
+test('skyStage shifts far-away players toward the bottom to leave upper sky play space without createRadialGradient', context => {
+  const originalImage = Object.getOwnPropertyDescriptor(globalThis, 'Image');
+  const originalRatio = Object.getOwnPropertyDescriptor(globalThis, 'devicePixelRatio');
+  Object.defineProperty(globalThis, 'Image', { configurable: true, value: class { src = ''; complete = false; naturalWidth = 0; } });
+  Object.defineProperty(globalThis, 'devicePixelRatio', { configurable: true, value: 1 });
+  context.after(() => {
+    if (originalImage) Object.defineProperty(globalThis, 'Image', originalImage);
+    else Reflect.deleteProperty(globalThis, 'Image');
+    if (originalRatio) Object.defineProperty(globalThis, 'devicePixelRatio', originalRatio);
+    else Reflect.deleteProperty(globalThis, 'devicePixelRatio');
+  });
+  let radialUsed = false;
+  const ctx = {
+    setTransform() {}, fillRect() {}, save() {}, restore() {}, scale() {}, translate() {}, drawImage() {},
+    beginPath() {}, moveTo() {}, lineTo() {}, stroke() {}, fill() {}, arc() {}, ellipse() {},
+    createLinearGradient() { return { addColorStop() {} }; },
+    createRadialGradient() { radialUsed = true; return { addColorStop() {} }; },
+  } as unknown as CanvasRenderingContext2D;
+  const canvas = { clientWidth: 1280, clientHeight: 720, width: 0, height: 0, getContext: () => ctx } as unknown as HTMLCanvasElement;
+  const video = { videoWidth: 1280, videoHeight: 720, readyState: 4 } as HTMLVideoElement;
+  const crop: CropRect = { x: 0, y: 0, width: 1, height: 1 };
+  const landmarks = Array.from({ length: 33 }, () => ({ x: 0.5, y: 0.5, visibility: 0 }));
+  landmarks[11] = { x: 0.46, y: 0.42, visibility: 1 };
+  landmarks[12] = { x: 0.54, y: 0.42, visibility: 1 };
+  const farPlayer: TrackedPlayer = { id: 1, center: { x: 0.5, y: 0.46 }, shoulderWidth: 0.08, landmarks, wrists: [{ x: 0.44, y: 0.48 }, { x: 0.56, y: 0.48 }], raised: false, bothRaised: false };
+  const frame: VisionFrame = { sequence: 1, capturedAt: 100, completedAt: 110, inferenceMs: 10, poses: [], hands: [], handsCapturedAt: 0 };
+  const stage = new Stage(canvas, { skyStage: true });
+  stage.draw(null, crop, [], null, null, 100);
+  assert.equal(stage.fit.y, 0);
+  stage.draw(video, crop, [farPlayer], frame, null, 600);
+  assert.equal(stage.fit.x, 0);
+  assert.equal(stage.fit.width, 1280);
+  assert.ok(stage.fit.y >= 180 && stage.fit.y <= 720 * 0.34 + 1);
+  const handStageY = toStage(farPlayer.wrists[0]!, stage.fit).y;
+  assert.ok(handStageY >= 720 * 0.72 && handStageY <= 720 * 0.85);
+  assert.equal(radialUsed, false);
+});

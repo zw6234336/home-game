@@ -19,6 +19,8 @@ body:has(dialog[open]) #gesture-cursor { z-index: 2147483647; }
 .crop-panel label { display: flex; align-items: center; gap: 5px; }
 .crop-panel input { width: 62px; border: 1px solid var(--line); background: white; border-radius: 6px; padding: 8px 4px; }
 .crop-panel .button { min-height: 40px; font-size: 13px; padding: 8px 12px; }
+.crop-presets { display: flex; flex-wrap: wrap; gap: 8px; padding: 6px 0 4px; }
+.crop-presets .button { min-height: 36px; font-size: 12px; padding: 6px 12px; }
 .crop-help { color: var(--muted); font-size: 12px; line-height: 1.6; }
 .setting-row { display: flex; align-items: center; justify-content: space-between; gap: 15px; padding: 13px 0; border-bottom: 1px solid var(--line); font-size: 14px; }
 .setting-row select { max-width: 280px; font-size: 14px; }

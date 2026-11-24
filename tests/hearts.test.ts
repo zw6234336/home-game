@@ -2,6 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { HeartCatchField, type BombHitEvent, type HeartCatchEvent } from '../src/game/hearts.ts';
 import { faceAnchor } from '../src/interaction/headwear.ts';
+import { PlayerTracker } from '../src/interaction/tracker.ts';
+import { PlayerRoster } from '../src/interaction/roster.ts';
 import { drawSootFace } from '../src/ui/soot-face.ts';
 import { createRound, hit, penalty } from '../src/game/round.ts';
 import type { ReachZone, Rect, TrackedPlayer } from '../src/types.ts';
@@ -159,4 +161,43 @@ test('HeartCatchField bombs transform only the catcher for active game time and 
   drawSootFace(ctx, face, 1, 2000);
   assert.equal(stats().radialUsed, false);
   assert.ok(stats().paths > 10);
+});
+
+test('HeartCatchField spawns from extended sky and tracks far-distance players cleanly', context => {
+  context.mock.method(Math, 'random', () => 0.25);
+  const skyFit: Rect = { x: 0, y: 210, width: 1000, height: 600 };
+  const caught: HeartCatchEvent[] = [];
+  const field = new HeartCatchField([zone], true, event => { caught.push(event); return true; }, () => {});
+  const { ctx } = mockCanvas();
+  const drawnY: number[] = [];
+  const origTranslate = ctx.translate;
+  ctx.translate = (x: number, y: number) => {
+    drawnY.push(y);
+    origTranslate.call(ctx, x, y);
+  };
+  field.update(900, skyFit);
+  field.draw(ctx, skyFit);
+  assert.ok(drawnY.some(y => y >= 0 && y < 180));
+
+  for (let step = 0; step < 65; step += 1) {
+    field.update(100, skyFit);
+    const sweepX = 0.08 + ((step * 3) % 12) * 0.075;
+    field.hands([{ playerId: 1, left: { x: Math.max(0.02, sweepX - 0.03), y: 0.48 }, right: { x: Math.min(0.98, sweepX + 0.03), y: 0.48 }, shoulderWidth: 0.06 }], skyFit, step * 100);
+    if (caught.length > 0) break;
+  }
+  assert.ok(caught.length >= 1);
+
+  const pose = Array.from({ length: 33 }, () => ({ x: 0.5, y: 0.5, visibility: 0 }));
+  pose[11] = { x: 0.475, y: 0.44, visibility: 0.9 };
+  pose[12] = { x: 0.525, y: 0.44, visibility: 0.9 };
+  pose[15] = { x: 0.47, y: 0.415, visibility: 0.9 };
+  pose[16] = { x: 0.53, y: 0.415, visibility: 0.9 };
+  const roster = new PlayerRoster();
+  const selected = roster.select([{ landmarks: pose }], 1, 1000);
+  assert.equal(selected.length, 1);
+  const tracker = new PlayerTracker(1);
+  const tracked = tracker.update(selected, 1000);
+  assert.equal(tracked.length, 1);
+  assert.equal(tracked[0].raised, true);
+  assert.equal(tracked[0].bothRaised, true);
 });

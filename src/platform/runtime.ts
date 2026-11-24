@@ -56,6 +56,22 @@ export class Sound {
     note.stop(start + 0.36);
     note.onended = () => { note.disconnect(); volume.disconnect(); };
   }
+  shield() {
+    if (!this.enabled || this.context?.state !== 'running') return;
+    const ctx = this.context;
+    const note = ctx.createOscillator();
+    const volume = ctx.createGain();
+    const start = ctx.currentTime;
+    note.type = 'triangle';
+    note.frequency.setValueAtTime(520, start);
+    note.frequency.exponentialRampToValueAtTime(1040, start + 0.14);
+    volume.gain.setValueAtTime(0.06, start);
+    volume.gain.exponentialRampToValueAtTime(0.001, start + 0.24);
+    note.connect(volume).connect(ctx.destination);
+    note.start(start);
+    note.stop(start + 0.25);
+    note.onended = () => { note.disconnect(); volume.disconnect(); };
+  }
   close() { void this.context?.close(); this.context = null; }
 }
 

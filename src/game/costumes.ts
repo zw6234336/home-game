@@ -1,9 +1,15 @@
-export type FaceKind = 'soot' | 'donkey' | 'piglet';
+export type FaceKind = 'soot' | 'donkey' | 'piglet' | 'princess' | 'pink-bunny';
 export type FaceEffect = { kind: FaceKind; alpha: number; elapsedMs: number };
 type Entry = { kind: FaceKind; remainingMs: number };
 
 const kinds: readonly FaceKind[] = ['soot', 'donkey', 'piglet'];
-export const faceNames: Readonly<Record<FaceKind, string>> = { soot: '小黑脸', donkey: '小驴脸', piglet: '小猪脸' };
+export const faceNames: Readonly<Record<FaceKind, string>> = {
+  soot: '小黑脸',
+  donkey: '小驴脸',
+  piglet: '小猪脸',
+  princess: '小公主',
+  'pink-bunny': '粉色毛兔',
+};
 
 export class FaceEffects {
   private entries = new Map<number, Entry>();

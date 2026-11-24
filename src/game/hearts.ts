@@ -167,7 +167,7 @@ function basketSegment(pair: CatchPair, fit: Rect): BasketSegment | null {
     if (dx > 8) angle = clamp(Math.atan2(dy, dx), -0.35, 0.35);
   }
   const normalizedWidth = Number.isFinite(pair.shoulderWidth) && pair.shoulderWidth > 0 ? pair.shoulderWidth : 0.18;
-  const width = clamp(normalizedWidth * fit.width * 1.05, 76, Math.max(96, fit.width * 0.34));
+  const width = clamp(normalizedWidth * fit.width * 1.05, 68, Math.max(96, fit.width * 0.34));
   const half = width / 2;
   const cos = Math.cos(angle);
   const sin = Math.sin(angle);
@@ -268,8 +268,8 @@ export class HeartCatchField {
       const laneSpan = (wideMax - wideMin) / 5;
       const baseX = clamp(wideMin + (laneIndex + 0.15 + Math.random() * 0.7) * laneSpan, 0.06, 0.94);
 
-      const visibleTop = clamp(-fit.y / fit.height + 0.02, 0.01, 0.32);
-      const speedBase = this.gentle ? (fever ? 0.26 : 0.21) : (fever ? 0.34 : 0.28);
+      const visibleTop = clamp(-fit.y / fit.height + 0.03, -0.55, 0.32);
+      const speedBase = this.gentle ? (fever ? 0.27 : 0.22) : (fever ? 0.35 : 0.29);
       const vy = speedBase * (kind === 'bomb' ? 1.08 : kind === 'gold' ? 1.12 : kind === 'big' ? 0.88 : 1) * (0.9 + Math.random() * 0.2);
       this.items.push({
         id: (kind === 'bomb' ? 'bomb-' : 'heart-') + (++this.serial),

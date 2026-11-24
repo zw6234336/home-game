@@ -87,3 +87,18 @@ test('a missing person and a different body cannot reuse readiness after a visib
   assert.equal(calibration.adapt(child, 2300), false);
   assert.deepEqual(calibration.verifiedPlayers(child), []);
 });
+
+test('brief big-arm shoulder twist or hip occlusion suspends without permanently losing calibration', () => {
+  const { tracker, calibration, zones } = prepare([person()]);
+  const twisted = tracker.update([person(0.5, 0.14 * 0.64)], 2070);
+  assert.equal(calibration.adapt(twisted, 2070), false);
+  assert.deepEqual(calibration.verifiedPlayers(twisted), []);
+  const hipGlitchObs = person();
+  hipGlitchObs.landmarks[23].y = 0.55;
+  hipGlitchObs.landmarks[24].y = 0.55;
+  const hipGlitch = tracker.update([hipGlitchObs], 2140);
+  assert.equal(calibration.adapt(hipGlitch, 2140), false);
+  const recovered = tracker.update([person()], 2210);
+  assert.equal(calibration.adapt(recovered, 2210), true);
+  assert.deepEqual(calibration.zones(recovered, true), zones);
+});

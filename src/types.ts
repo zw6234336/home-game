@@ -17,6 +17,13 @@ export type VisionFrame = {
 };
 export type VisionStatus = { state: 'loading' | 'ready' | 'stopped'; delegate: 'GPU' | 'CPU' | null; message: string };
 export type VisionStats = { captured: number; submitted: number; dropped: number; completed: number; inferenceMs: number; ageMs: number; delegate: 'GPU' | 'CPU' | null };
+export type StereoMeasurement = {
+  depthMeters: number | null;
+  depthConfidence: number;
+  realShoulderMeters: number | null;
+  disparityPx: number | null;
+  appearance: number[] | null;
+};
 export type TrackedPlayer = {
   id: number;
   center: Point;
@@ -25,5 +32,8 @@ export type TrackedPlayer = {
   wrists: [Point | null, Point | null];
   raised: boolean;
   bothRaised: boolean;
+  depthMeters?: number | null;
+  depthConfidence?: number;
+  realShoulderMeters?: number | null;
 };
 export type ReachZone = Rect & { playerId: number };

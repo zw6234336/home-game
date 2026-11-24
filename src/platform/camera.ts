@@ -1,3 +1,43 @@
+import type { CropRect } from '../types.ts';
+
+export type CropPreset = 'left' | 'right' | 'left-near' | 'full';
+
+export function isWideStereoFrame(videoWidth: number, videoHeight: number): boolean {
+  return Number.isFinite(videoWidth) && Number.isFinite(videoHeight) && videoWidth > 0 && videoHeight > 0 && videoWidth / videoHeight >= 2.6;
+}
+
+export function isOv580StereoFrame(videoWidth: number, videoHeight: number): boolean {
+  if (!Number.isFinite(videoWidth) || !Number.isFinite(videoHeight) || videoWidth <= 0 || videoHeight <= 0) return false;
+  const eyeHeight = videoHeight >= 400 ? videoHeight - 8 : videoHeight;
+  const eyeWidth = Math.round(eyeHeight * 1.6);
+  return eyeWidth >= 320 && videoWidth / videoHeight >= 3.8 && 48 + eyeWidth * 2 < videoWidth && Math.abs(videoWidth - (48 + eyeWidth * 2 + Math.round(eyeWidth * 0.65625))) <= 8;
+}
+
+export function stereoCropPreset(videoWidth: number, videoHeight: number, preset: CropPreset): CropRect {
+  if (preset === 'full' || !Number.isFinite(videoWidth) || !Number.isFinite(videoHeight) || videoWidth <= 0 || videoHeight <= 0) {
+    return { x: 0, y: 0, width: 1, height: 1 };
+  }
+  const aspect = videoWidth / videoHeight;
+  let eye: CropRect = { x: 0, y: 0, width: 1, height: 1 };
+  if (aspect >= 3.8) {
+    const eyeHeight = videoHeight >= 400 ? videoHeight - 8 : videoHeight;
+    const eyeWidth = Math.round(eyeHeight * 1.6);
+    if (48 + eyeWidth * 2 <= videoWidth) {
+      const startX = preset === 'right' ? 48 + eyeWidth : 48;
+      eye = { x: startX / videoWidth, y: 0, width: eyeWidth / videoWidth, height: eyeHeight / videoHeight };
+    } else {
+      eye = preset === 'right' ? { x: 0.5, y: 0, width: 0.5, height: 1 } : { x: 0, y: 0, width: 0.5, height: 1 };
+    }
+  } else if (aspect >= 2.4) {
+    eye = preset === 'right' ? { x: 0.5, y: 0, width: 0.5, height: 1 } : { x: 0, y: 0, width: 0.5, height: 1 };
+  }
+  if (preset !== 'left-near') return eye;
+  const zoom = 0.75;
+  const width = eye.width * zoom;
+  const height = eye.height * zoom;
+  return { x: eye.x + (eye.width - width) / 2, y: eye.y + (eye.height - height) / 2, width, height };
+}
+
 export class CameraSession {
   readonly video = document.createElement('video');
   private stream: MediaStream | null = null;
@@ -12,8 +52,23 @@ export class CameraSession {
     this.stop();
     const generation = this.generation;
     if (!isSecureContext || !navigator.mediaDevices?.getUserMedia) throw new Error('请通过 localhost 或可信 HTTPS 打开，浏览器才能使用摄像头。');
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: deviceId ? { deviceId: { exact: deviceId }, frameRate: { ideal: 30, max: 60 } } : { width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30, max: 60 } } });
+    const baseConstraints: MediaTrackConstraints = { width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30, max: 60 } };
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: deviceId ? { ...baseConstraints, deviceId: { exact: deviceId } } : baseConstraints });
     if (generation !== this.generation) { stream.getTracks().forEach(track => track.stop()); return false; }
+    const track = stream.getVideoTracks()[0];
+    if (track && typeof track.getCapabilities === 'function' && typeof track.applyConstraints === 'function') {
+      try {
+        const capabilities = track.getCapabilities();
+        const maxWidth = capabilities.width?.max ?? 0;
+        const maxHeight = capabilities.height?.max ?? 0;
+        const currentHeight = track.getSettings?.().height ?? 0;
+        if (isWideStereoFrame(maxWidth, maxHeight) && currentHeight < Math.min(808, maxHeight)) {
+          await track.applyConstraints({ width: { ideal: maxWidth }, height: { ideal: maxHeight }, frameRate: { ideal: 30, max: 60 } });
+        }
+      } catch {
+      }
+      if (generation !== this.generation) { stream.getTracks().forEach(item => item.stop()); return false; }
+    }
     this.stream = stream;
     this.video.srcObject = stream;
     try { await this.video.play(); } catch (error) { if (generation === this.generation) this.stop(); else stream.getTracks().forEach(track => track.stop()); throw error; }

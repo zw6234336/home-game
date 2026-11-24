@@ -213,6 +213,7 @@ export class VisionPipeline {
       const dimensions = captureGeometry(video.videoWidth, video.videoHeight, this.crop, qualityProfile(config.quality).longEdge);
       if (canvas.width !== dimensions.width) canvas.width = dimensions.width;
       if (canvas.height !== dimensions.height) canvas.height = dimensions.height;
+      if (typeof context.filter === 'string') context.filter = 'contrast(1.08) brightness(1.03)';
       context.drawImage(video, dimensions.sourceX, dimensions.sourceY, dimensions.sourceWidth, dimensions.sourceHeight, 0, 0, dimensions.width, dimensions.height);
       bitmap = await this.runtime.createBitmap(canvas);
       if (!this.isCurrent(worker, generation) || this.pending !== pending) return;

@@ -4,6 +4,7 @@ import type { HeadwearPose } from '../interaction/headwear.ts';
 import type { FaceEffect } from '../game/costumes.ts';
 import { faceNames } from '../game/costumes.ts';
 import { drawSootFace } from './soot-face.ts';
+import { drawPinkBunnyFace, drawPrincessFace } from './gate-costumes.ts';
 
 export function drawTreasure(ctx: CanvasRenderingContext2D, name: GameArt, x: number, y: number, radius: number, angle: number, points: number): boolean {
   const image = gameArt.get(name);
@@ -29,6 +30,14 @@ export function drawTreasure(ctx: CanvasRenderingContext2D, name: GameArt, x: nu
 }
 
 export function drawCostumeFace(ctx: CanvasRenderingContext2D, face: HeadwearPose, effect: FaceEffect): void {
+  if (effect.kind === 'princess') {
+    drawPrincessFace(ctx, face, effect.alpha, effect.elapsedMs, false);
+    return;
+  }
+  if (effect.kind === 'pink-bunny') {
+    drawPinkBunnyFace(ctx, face, effect.alpha, effect.elapsedMs);
+    return;
+  }
   const image = effect.kind === 'soot' ? null : gameArt.get(effect.kind);
   if (!image) {
     drawSootFace(ctx, face, effect.alpha, effect.elapsedMs);
@@ -53,7 +62,8 @@ export function drawDemoFace(ctx: CanvasRenderingContext2D, x: number, y: number
   ctx.arc(x, y, size * 0.64, 0, Math.PI * 2);
   ctx.fill();
   ctx.stroke();
-  if (effect) drawCostumeFace(ctx, { x, y, size, angle: 0 }, effect);
+  if (effect?.kind === 'princess') drawPrincessFace(ctx, { x, y, size, angle: 0 }, effect.alpha, effect.elapsedMs, true);
+  else if (effect) drawCostumeFace(ctx, { x, y, size, angle: 0 }, effect);
   else {
     ctx.fillStyle = '#46345b';
     for (const dx of [-0.22, 0.22]) {

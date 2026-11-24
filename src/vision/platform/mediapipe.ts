@@ -57,9 +57,9 @@ export class MediaPipeModelFactory implements ModelFactory {
       canvas,
       runningMode: 'VIDEO',
       numPoses: Math.max(4, config.numPoses),
-      minPoseDetectionConfidence: 0.5,
-      minPosePresenceConfidence: 0.5,
-      minTrackingConfidence: 0.5,
+      minPoseDetectionConfidence: 0.38,
+      minPosePresenceConfidence: 0.35,
+      minTrackingConfidence: 0.28,
       outputSegmentationMasks: false,
     }));
     return {
@@ -81,9 +81,9 @@ export class MediaPipeModelFactory implements ModelFactory {
       canvas,
       runningMode: 'VIDEO',
       numHands: 4,
-      minHandDetectionConfidence: 0.5,
-      minHandPresenceConfidence: 0.5,
-      minTrackingConfidence: 0.5,
+      minHandDetectionConfidence: 0.4,
+      minHandPresenceConfidence: 0.4,
+      minTrackingConfidence: 0.35,
     }));
     return {
       detect(image, timestamp) {

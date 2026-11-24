@@ -55,8 +55,8 @@ function observe(players: TrackedPlayer[]): Observation | null {
     }
   }
   if (!bounds) return null;
-  const horizontal = Math.max(0.06, largestWidth * 0.45);
-  const vertical = Math.max(0.08, largestWidth * 0.6);
+  const horizontal = Math.max(0.075, largestWidth * 0.6);
+  const vertical = Math.max(0.09, largestWidth * 0.7);
   return {
     bodies,
     bounds,
@@ -97,7 +97,7 @@ export class FramingController {
     const latest = this.extents.at(-1);
     if (latest?.time === time) latest.bounds = union(latest.bounds, observation.padded);
     else this.extents.push({ time, bounds: observation.padded });
-    this.extents = this.extents.filter(sample => time - sample.time <= 1500).slice(-90);
+    this.extents = this.extents.filter(sample => time - sample.time <= 2600).slice(-120);
     const envelope = this.extents.reduce((bounds, sample) => union(bounds, sample.bounds), observation.padded);
     const desired = square(envelope, 0.68);
     const urgent = !contains(this.view, observation.bounds);
@@ -108,10 +108,10 @@ export class FramingController {
       const currentFocus = center(this.focus);
       const desiredFocus = center(desired);
       const offset = { x: desiredFocus.x - currentFocus.x, y: desiredFocus.y - currentFocus.y };
-      const moving = Math.hypot(offset.x, offset.y) > 0.018 || Math.abs(desired.width - this.focus.width) > 0.025;
+      const moving = Math.hypot(offset.x, offset.y) > 0.022 || Math.abs(desired.width - this.focus.width) > 0.03;
       if (!moving) this.pendingFocus = null;
       else if (!this.pendingFocus || offset.x * this.pendingFocus.offset.x + offset.y * this.pendingFocus.offset.y < 0) this.pendingFocus = { since: time, offset };
-      else if (time - this.pendingFocus.since >= 180) {
+      else if (time - this.pendingFocus.since >= 240) {
         this.focus = desired;
         this.pendingFocus = null;
       }
@@ -119,8 +119,8 @@ export class FramingController {
     if (elapsed === 0 && !urgent) return { ...this.view };
     const target = center(this.focus);
     const current = center(this.view);
-    const movement = 1 - Math.exp(-elapsed / 300);
-    const zoom = 1 - Math.exp(-elapsed / 550);
+    const movement = 1 - Math.exp(-elapsed / 400);
+    const zoom = 1 - Math.exp(-elapsed / 850);
     const size = this.focus.width >= this.view.width ? this.focus.width : this.view.width + (this.focus.width - this.view.width) * zoom;
     const nextCenter = urgent ? target : { x: current.x + (target.x - current.x) * movement, y: current.y + (target.y - current.y) * movement };
     this.view = square(observation.bounds, urgent ? Math.max(size, this.view.width) : size, nextCenter);

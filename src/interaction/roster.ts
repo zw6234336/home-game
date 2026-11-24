@@ -57,19 +57,19 @@ function candidateFor(pose: PoseObservation): Candidate | null {
     y: torso.reduce((sum, point) => sum + point.y, 0) / torso.length,
   };
   const width = s11 && s12 ? distance(s11, s12) : h23 && h24 ? distance(h23, h24) * 1.2 : 0.18;
-  const shoulderWidth = Math.max(0.04, width);
+  const shoulderWidth = Math.max(0.025, width);
   const raised = wristIndices.some((wIndex, side) => {
     const wrist = landmarks[wIndex];
     const shoulder = landmarks[shoulderIndices[side]];
-    return validPoint(wrist) && validPoint(shoulder) && wrist.y < shoulder.y - Math.max(0.03, shoulderWidth * 0.15);
+    return validPoint(wrist) && validPoint(shoulder) && wrist.y < shoulder.y - Math.max(0.015, shoulderWidth * 0.15);
   });
   return {
     pose,
     center,
     anchors: { shoulders, hips },
     shoulderWidth,
-    bodyWidth: s11 && s12 && width >= 0.04 ? width : null,
-    torsoHeight: shoulders && hips && distance(shoulders, hips) >= 0.04 ? distance(shoulders, hips) : null,
+    bodyWidth: s11 && s12 && width >= 0.025 ? width : null,
+    torsoHeight: shoulders && hips && distance(shoulders, hips) >= 0.025 ? distance(shoulders, hips) : null,
     raised,
     confidence: torso.length + torso.reduce((sum, point) => sum + point.visibility, 0) / torso.length,
   };
@@ -84,8 +84,8 @@ function commonAnchors(first: Anchors, second: Anchors): [Point, Point] | null {
 function matchCost(track: RoomTrack, candidate: Candidate, time: number): number | null {
   const anchors = commonAnchors(track.anchors, candidate.anchors);
   if (!anchors) return null;
-  const scaleBad = (a: number | null, b: number | null) => a !== null && b !== null && Math.max(a, b) > Math.min(a, b) * 1.65;
-  if (scaleBad(track.bodyWidth, candidate.bodyWidth) || scaleBad(track.torsoHeight, candidate.torsoHeight)) return null;
+  const scaleBad = (a: number | null, b: number | null, limit: number) => a !== null && b !== null && Math.max(a, b) > Math.min(a, b) * limit;
+  if (scaleBad(track.bodyWidth, candidate.bodyWidth, 1.8) || scaleBad(track.torsoHeight, candidate.torsoHeight, 2.1)) return null;
   const elapsed = Math.max(0, (time - track.lastSeen) / 1000);
   const displacement = distance(anchors[0], anchors[1]);
   const limit = Math.min(0.42, Math.max(0.14, Math.max(track.shoulderWidth, candidate.shoulderWidth) * 1.2) + elapsed * 0.8);

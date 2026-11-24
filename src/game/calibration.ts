@@ -23,6 +23,16 @@ function sameReach(sample: Sample, player: TrackedPlayer): boolean {
   return Math.abs(next.center.x - base.center.x) <= Math.max(0.12, base.width) && Math.abs(next.center.y - base.center.y) <= 0.16;
 }
 
+function hardDiscontinuity(previous: Signature, next: Signature, displacement: number): boolean {
+  const widthRatio = next.width / previous.width;
+  if (widthRatio < 0.58 || widthRatio > 1.65) return true;
+  if (previous.height && next.height) {
+    const rawHeightRatio = next.height / previous.height;
+    if (rawHeightRatio < 0.45 || rawHeightRatio > 2.0) return true;
+  }
+  return displacement > 0.18 || Math.abs(next.center.x - previous.center.x) > Math.max(0.18, previous.width * 1.4) || Math.abs(next.center.y - previous.center.y) > 0.22;
+}
+
 function separated(players: TrackedPlayer[]) {
   const signatures = players.map(signature).filter((value): value is Signature => value !== null);
   return signatures.every((first, index) => signatures.slice(index + 1).every(second => Math.abs(first.center.x - second.center.x) >= Math.max(0.12, (first.width + second.width) * 0.6)));
@@ -154,12 +164,12 @@ export class Calibration {
       const expectedHeight = previous.height === null ? null : previous.height * ratio;
       const heightRatio = expectedHeight && next.height ? next.height / expectedHeight : 1;
       const displacement = Math.hypot(next.center.x - previous.center.x, next.center.y - previous.center.y);
-      if (!sameReach(sample, player) || displacement > 0.18) {
+      if (hardDiscontinuity(previous, next, displacement)) {
         reason = 'hard_jump';
         invalidate(sample);
         continue;
       }
-      if (ratio < 1 / scaleLimit || ratio > scaleLimit || heightRatio < 0.65 || heightRatio > 1.5 || displacement > motionLimit) {
+      if (!sameReach(sample, player) || ratio < 1 / scaleLimit || ratio > scaleLimit || heightRatio < 0.65 || heightRatio > 1.5 || displacement > motionLimit) {
         reason = displacement > motionLimit ? 'soft_motion_jitter' : 'soft_scale_jitter';
         sample.suspendedAt ??= time;
         continue;

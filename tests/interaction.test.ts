@@ -398,3 +398,35 @@ test('normal scale changes preserve identity', () => {
   assert.equal(tracker.update([pose(0.5, 0.22)], 100)[0].id, id);
   assert.equal(tracker.update([pose(0.5, 0.17)], 200)[0].id, id);
 });
+
+test('arm joint stabilization damps optical micro-jitter without delaying deliberate pose changes or fabricating missing joints', () => {
+  const tracker = new PlayerTracker(1);
+  tracker.update([pose(0.5, 0.16, 0.35)], 0);
+  let rawError = 0;
+  let smoothError = 0;
+  for (let frame = 1; frame <= 30; frame += 1) {
+    const jitter = frame % 2 === 0 ? 0.015 : -0.015;
+    const sample = pose(0.5, 0.16, 0.35);
+    sample.landmarks[13] = { x: 0.36 + jitter, y: 0.35 + jitter, visibility: 1 };
+    sample.landmarks[15] = { x: 0.34 + jitter, y: 0.35 + jitter, visibility: 1 };
+    const tracked = tracker.update([sample], frame * 33)[0];
+    rawError += jitter ** 2;
+    smoothError += (tracked.landmarks[13].x - 0.36) ** 2;
+  }
+  assert.ok(smoothError < rawError / 3);
+  const deliberate = pose(0.5, 0.16, 0.2);
+  deliberate.landmarks[13] = { x: 0.25, y: 0.25, visibility: 1 };
+  const snapped = tracker.update([deliberate], 31 * 33)[0];
+  close(snapped.landmarks[13].x, 0.25);
+  const missingElbow = pose(0.5, 0.16, 0.2);
+  missingElbow.landmarks[13] = { x: 0.25, y: 0.25, visibility: 0.2 };
+  assert.equal(tracker.update([missingElbow], 32 * 33)[0].landmarks[13].visibility, 0.2);
+});
+
+test('raise hysteresis avoids boundary flicker while dropping cleanly when hand lowers', () => {
+  const tracker = new PlayerTracker(1);
+  assert.equal(tracker.update([pose(0.5, 0.16, 0.31)], 0)[0].raised, true);
+  assert.equal(tracker.update([pose(0.5, 0.16, 0.333)], 33)[0].raised, true);
+  tracker.update([pose(0.5, 0.16, 0.52)], 66);
+  assert.equal(tracker.update([pose(0.5, 0.16, 0.52)], 99)[0].raised, false);
+});

@@ -4,10 +4,11 @@ import { validLandmark } from './geometry.ts';
 
 type BodyAnchors = { shoulders: Point | null; hips: Point | null };
 type Candidate = { center: Point; anchors: BodyAnchors; shoulderWidth: number; bodyWidth: number | null; torsoHeight: number | null; confidence: number; landmarks: Landmark[] };
-type WristState = { x: OneEuroFilter; y: OneEuroFilter; raw: Point | null; lastAt: number | null };
-type Track = { id: number; center: Point; anchors: BodyAnchors; velocity: Point; shoulderWidth: number; bodyWidth: number | null; torsoHeight: number | null; lastSeen: number; observations: number; wrists: [WristState, WristState] };
+type JointState = { x: OneEuroFilter; y: OneEuroFilter; raw: Point | null; lastAt: number | null };
+type Track = { id: number; center: Point; anchors: BodyAnchors; velocity: Point; shoulderWidth: number; bodyWidth: number | null; torsoHeight: number | null; lastSeen: number; observations: number; armJoints: [JointState, JointState, JointState, JointState]; wrists: [JointState, JointState]; raisedSides: [boolean, boolean] };
 
 const torsoIndices = [11, 12, 23, 24];
+const armIndices = [13, 14, 15, 16] as const;
 const wristIndices = [15, 16] as const;
 const shoulderIndices = [11, 12] as const;
 
@@ -51,23 +52,68 @@ function candidateFor(pose: PoseObservation): Candidate | null {
   return {
     center,
     anchors: { shoulders, hips },
-    shoulderWidth: Math.max(0.04, width),
-    bodyWidth: shouldersValid && width >= 0.04 ? width : null,
-    torsoHeight: shoulders && hips && distance(shoulders, hips) >= 0.04 ? distance(shoulders, hips) : null,
+    shoulderWidth: Math.max(0.025, width),
+    bodyWidth: shouldersValid && width >= 0.025 ? width : null,
+    torsoHeight: shoulders && hips && distance(shoulders, hips) >= 0.025 ? distance(shoulders, hips) : null,
     confidence: torso.length + torso.reduce((sum, point) => sum + point.visibility, 0) / torso.length,
     landmarks,
   };
 }
 
-function createWrist(): WristState {
-  return { x: new OneEuroFilter(), y: new OneEuroFilter(), raw: null, lastAt: null };
+function createJoint(minCutoff = 1.6, beta = 1.8): JointState {
+  return { x: new OneEuroFilter({ minCutoff, beta }), y: new OneEuroFilter({ minCutoff, beta }), raw: null, lastAt: null };
 }
 
-function resetWrist(wrist: WristState): void {
-  wrist.x.reset();
-  wrist.y.reset();
-  wrist.raw = null;
-  wrist.lastAt = null;
+function resetJoint(joint: JointState): void {
+  joint.x.reset();
+  joint.y.reset();
+  joint.raw = null;
+  joint.lastAt = null;
+}
+
+function clampUnit(value: number): number {
+  return Math.max(0, Math.min(1, value));
+}
+
+function smoothWrist(state: JointState, landmark: Landmark, centerShift: Point, shoulderWidth: number, elapsed: number, timestamp: number): Point | null {
+  if (!validLandmark(landmark)) {
+    resetJoint(state);
+    return null;
+  }
+  if (elapsed > 150 || (state.lastAt !== null && timestamp - state.lastAt > 150)) {
+    resetJoint(state);
+  }
+  if (state.raw && state.lastAt !== null) {
+    const motion = Math.hypot(landmark.x - state.raw.x - centerShift.x, landmark.y - state.raw.y - centerShift.y);
+    const limit = Math.max(0.25, shoulderWidth * 1.5) + (timestamp - state.lastAt) / 1000;
+    if (motion > limit) {
+      resetJoint(state);
+      return null;
+    }
+  }
+  const point = { x: clampUnit(state.x.update(landmark.x, timestamp)), y: clampUnit(state.y.update(landmark.y, timestamp)) };
+  state.raw = { x: landmark.x, y: landmark.y };
+  state.lastAt = timestamp;
+  return point;
+}
+
+function stabilizeArmJoint(state: JointState, landmark: Landmark, centerShift: Point, shoulderWidth: number, elapsed: number, timestamp: number): Point | null {
+  if (!validLandmark(landmark)) {
+    resetJoint(state);
+    return null;
+  }
+  if (elapsed > 150 || (state.lastAt !== null && timestamp - state.lastAt > 150)) {
+    resetJoint(state);
+  } else if (state.raw) {
+    const motion = Math.hypot(landmark.x - state.raw.x - centerShift.x, landmark.y - state.raw.y - centerShift.y);
+    if (motion > Math.max(0.035, shoulderWidth * 0.28)) {
+      resetJoint(state);
+    }
+  }
+  const point = { x: clampUnit(state.x.update(landmark.x, timestamp)), y: clampUnit(state.y.update(landmark.y, timestamp)) };
+  state.raw = { x: landmark.x, y: landmark.y };
+  state.lastAt = timestamp;
+  return point;
 }
 
 function copyPlayer(player: TrackedPlayer): TrackedPlayer {
@@ -89,8 +135,8 @@ function commonAnchors(first: BodyAnchors, second: BodyAnchors): [Point, Point] 
 function matchingCost(track: Track, candidate: Candidate, time: number): number | null {
   const anchors = commonAnchors(track.anchors, candidate.anchors);
   if (!anchors) return null;
-  const scaleChanged = (previous: number | null, current: number | null): boolean => previous !== null && current !== null && Math.max(previous, current) > Math.min(previous, current) * 1.8;
-  if (scaleChanged(track.bodyWidth, candidate.bodyWidth) || scaleChanged(track.torsoHeight, candidate.torsoHeight)) {
+  const scaleChanged = (previous: number | null, current: number | null, limit: number): boolean => previous !== null && current !== null && Math.max(previous, current) > Math.min(previous, current) * limit;
+  if (scaleChanged(track.bodyWidth, candidate.bodyWidth, 1.8) || scaleChanged(track.torsoHeight, candidate.torsoHeight, 2.1)) {
     return null;
   }
   const elapsed = (time - track.lastSeen) / 1000;
@@ -195,7 +241,9 @@ export class PlayerTracker {
         torsoHeight: candidate.torsoHeight,
         lastSeen: timestamp,
         observations: 0,
-        wrists: [createWrist(), createWrist()],
+        armJoints: [createJoint(1.4, 1.5), createJoint(1.4, 1.5), createJoint(1.4, 1.5), createJoint(1.4, 1.5)],
+        wrists: [createJoint(1.6, 1.8), createJoint(1.6, 1.8)],
+        raisedSides: [false, false],
       };
       this.nextId += 1;
       activeTracks.push(track);
@@ -203,7 +251,9 @@ export class PlayerTracker {
     }
     const missingTracks = this.tracks.filter((track) => !activeTracks.includes(track)).sort((first, second) => second.lastSeen - first.lastSeen);
     for (const track of missingTracks) {
-      track.wrists.forEach(resetWrist);
+      track.armJoints.forEach(resetJoint);
+      track.wrists.forEach(resetJoint);
+      track.raisedSides = [false, false];
     }
     this.tracks = [...activeTracks, ...missingTracks].slice(0, this.maxPlayers).sort((first, second) => first.id - second.id);
     this.lastPlayers = players.sort((first, second) => first.id - second.id);
@@ -220,29 +270,12 @@ export class PlayerTracker {
     const elapsed = timestamp - track.lastSeen;
     const anchors = commonAnchors(track.anchors, candidate.anchors);
     const centerShift = anchors ? { x: anchors[1].x - anchors[0].x, y: anchors[1].y - anchors[0].y } : { x: 0, y: 0 };
-    const wrists = wristIndices.map((index, side) => {
-      const state = track.wrists[side];
-      const landmark = candidate.landmarks[index];
-      if (!validLandmark(landmark)) {
-        resetWrist(state);
-        return null;
-      }
-      if (elapsed > 150 || (state.lastAt !== null && timestamp - state.lastAt > 150)) {
-        resetWrist(state);
-      }
-      if (state.raw && state.lastAt !== null) {
-        const motion = Math.hypot(landmark.x - state.raw.x - centerShift.x, landmark.y - state.raw.y - centerShift.y);
-        const limit = Math.max(0.25, candidate.shoulderWidth * 1.5) + (timestamp - state.lastAt) / 1000;
-        if (motion > limit) {
-          resetWrist(state);
-          return null;
-        }
-      }
-      const point = { x: state.x.update(landmark.x, timestamp), y: state.y.update(landmark.y, timestamp) };
-      state.raw = { x: landmark.x, y: landmark.y };
-      state.lastAt = timestamp;
-      return point;
-    }) as [Point | null, Point | null];
+    const wrists = wristIndices.map((index, side) => smoothWrist(track.wrists[side], candidate.landmarks[index], centerShift, candidate.shoulderWidth, elapsed, timestamp)) as [Point | null, Point | null];
+    for (let index = 0; index < armIndices.length; index += 1) {
+      const landmarkIndex = armIndices[index];
+      const point = stabilizeArmJoint(track.armJoints[index], candidate.landmarks[landmarkIndex], centerShift, candidate.shoulderWidth, elapsed, timestamp);
+      if (point) candidate.landmarks[landmarkIndex] = { ...candidate.landmarks[landmarkIndex], x: point.x, y: point.y };
+    }
     if (elapsed > 0 && elapsed <= 150) {
       const velocity = { x: Math.max(-3, Math.min(3, centerShift.x * 1000 / elapsed)), y: Math.max(-3, Math.min(3, centerShift.y * 1000 / elapsed)) };
       const speed = Math.hypot(velocity.x, velocity.y);
@@ -259,10 +292,15 @@ export class PlayerTracker {
     track.torsoHeight = candidate.torsoHeight ?? track.torsoHeight;
     track.lastSeen = timestamp;
     track.observations += 1;
+    const enterOffset = Math.max(0.015, candidate.shoulderWidth * 0.15);
+    const exitOffset = enterOffset * 0.45;
     const raised = wrists.map((wrist, side) => {
       const shoulder = candidate.landmarks[shoulderIndices[side]];
-      return wrist !== null && validLandmark(shoulder) && wrist.y < shoulder.y - Math.max(0.03, candidate.shoulderWidth * 0.15);
-    });
+      if (wrist === null || !validLandmark(shoulder)) return false;
+      const wasRaised = elapsed <= 150 && track.raisedSides[side];
+      return wrist.y < shoulder.y - (wasRaised ? exitOffset : enterOffset);
+    }) as [boolean, boolean];
+    track.raisedSides = raised;
     return { id: track.id, center: candidate.center, shoulderWidth: candidate.shoulderWidth, landmarks: candidate.landmarks, wrists, raised: raised[0] || raised[1], bothRaised: raised[0] && raised[1] };
   }
 }

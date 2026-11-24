@@ -7,6 +7,58 @@ import type { FaceEffect } from '../game/costumes.ts';
 import { drawUnicornPony } from './unicorn.ts';
 
 export type StageField = { draw(ctx: CanvasRenderingContext2D, fit: Rect): void; clearTrails(): void; faceEffect?(playerId: number): FaceEffect | null };
+export type StageOptions = { illustration?: string; opacity?: number; background?: string; demoFaces?: boolean; skyStage?: boolean };
+
+function drawCloud(ctx: CanvasRenderingContext2D, x: number, y: number, scale: number, alpha: number) {
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.fillStyle = '#ffffff';
+  ctx.beginPath();
+  ctx.ellipse(x, y, 42 * scale, 18 * scale, 0, 0, Math.PI * 2);
+  ctx.ellipse(x - 24 * scale, y - 6 * scale, 24 * scale, 16 * scale, 0, 0, Math.PI * 2);
+  ctx.ellipse(x + 22 * scale, y - 4 * scale, 26 * scale, 15 * scale, 0, 0, Math.PI * 2);
+  ctx.ellipse(x, y - 14 * scale, 22 * scale, 16 * scale, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+}
+
+const skyStops: readonly [number, number, number, number][] = [
+  [0, 201, 222, 250],
+  [0.45, 232, 224, 248],
+  [0.8, 250, 233, 239],
+  [1, 255, 243, 232],
+];
+
+function skyRgbAt(ratio: number): string {
+  const t = Math.max(0, Math.min(1, ratio));
+  for (let i = 0; i < skyStops.length - 1; i += 1) {
+    const a = skyStops[i];
+    const b = skyStops[i + 1];
+    if (t <= b[0]) {
+      const k = (t - a[0]) / (b[0] - a[0]);
+      const r = Math.round(a[1] + (b[1] - a[1]) * k);
+      const g = Math.round(a[2] + (b[2] - a[2]) * k);
+      const bl = Math.round(a[3] + (b[3] - a[3]) * k);
+      return `${r}, ${g}, ${bl}`;
+    }
+  }
+  return '255, 243, 232';
+}
+
+function drawSkyBackdrop(ctx: CanvasRenderingContext2D, w: number, h: number, now: number) {
+  const sky = ctx.createLinearGradient(0, 0, 0, h);
+  sky.addColorStop(0, '#c9defa');
+  sky.addColorStop(0.45, '#e8e0f8');
+  sky.addColorStop(0.8, '#fae9ef');
+  sky.addColorStop(1, '#fff3e8');
+  ctx.fillStyle = sky;
+  ctx.fillRect(0, 0, w, h);
+  const drift = Number.isFinite(now) ? now * 0.008 : 0;
+  const span = w + 240;
+  drawCloud(ctx, ((w * 0.16 + drift) % span) - 120, h * 0.14, 1.15, 0.72);
+  drawCloud(ctx, ((w * 0.56 + drift * 0.7) % span) - 120, h * 0.1, 0.9, 0.65);
+  drawCloud(ctx, ((w * 0.84 + drift * 0.9) % span) - 120, h * 0.2, 1.05, 0.68);
+}
 
 export class Stage {
   readonly canvas: HTMLCanvasElement;
@@ -21,11 +73,15 @@ export class Stage {
   private headwear = new HeadwearTracker();
   private faces = new HeadwearTracker(faceAnchor);
   private demoFaces: boolean;
-  constructor(canvas: HTMLCanvasElement, options?: { illustration?: string; opacity?: number; background?: string; demoFaces?: boolean }) {
+  private skyStage: boolean;
+  private skyShift = 0;
+  private lastDrawAt: number | null = null;
+  constructor(canvas: HTMLCanvasElement, options?: StageOptions) {
     this.setIllustration(options?.illustration ?? scene(2, false));
     this.illustrationOpacity = options?.opacity ?? .14;
     this.background = options?.background ?? '#d9cef2';
     this.demoFaces = options?.demoFaces ?? false;
+    this.skyStage = options?.skyStage ?? false;
     this.canvas = canvas;
     this.ctx = canvas.getContext('2d', { alpha: false })!;
   }
@@ -49,16 +105,68 @@ export class Stage {
     }
     const ctx = this.ctx;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.fillStyle = this.illustrationOpacity === 1 ? this.background : '#e9e2f3'; ctx.fillRect(0, 0, w, h);
+    if (this.skyStage) drawSkyBackdrop(ctx, w, h, now);
+    else { ctx.fillStyle = this.illustrationOpacity === 1 ? this.background : '#e9e2f3'; ctx.fillRect(0, 0, w, h); }
     const sw = video?.videoWidth ? video.videoWidth * crop.width : 1280;
     const sh = video?.videoHeight ? video.videoHeight * crop.height : 800;
-    this.fit = framingFit(sw, sh, w, h, this.framing);
+    const baseFit = framingFit(sw, sh, w, h, this.framing);
+    if (this.skyStage) {
+      const liveCamera = Boolean(video && video.readyState >= 2);
+      const wideScale = liveCamera || players.length > 0 ? Math.min(w / sw, (h / sh) * 1.28) : Math.min(w / sw, h / sh);
+      const skyWidth = sw * wideScale;
+      const skyHeight = sh * wideScale;
+      const skyX = (w - skyWidth) / 2;
+      let anchorY = 0.56;
+      const ys = players.flatMap(player => {
+        const points: number[] = [];
+        for (const index of [11, 12]) if (validLandmark(player.landmarks[index])) points.push(player.landmarks[index].y);
+        for (const wrist of player.wrists) if (wrist && Number.isFinite(wrist.y)) points.push(wrist.y);
+        return points;
+      });
+      if (ys.length > 0) anchorY = Math.max(...ys);
+      const desiredBottomY = h * 0.8;
+      const minY = Math.min(0, h - skyHeight);
+      const maxY = h * 0.34;
+      const targetY = liveCamera || players.length > 0 ? Math.max(minY, Math.min(maxY, desiredBottomY - anchorY * skyHeight)) : baseFit.y;
+      if (this.lastDrawAt === null || !Number.isFinite(now) || now < this.lastDrawAt || now - this.lastDrawAt > 400) this.skyShift = targetY;
+      else this.skyShift += (targetY - this.skyShift) * (1 - Math.exp(-(now - this.lastDrawAt) / 220));
+      this.lastDrawAt = Number.isFinite(now) ? now : null;
+      this.fit = { x: skyX, y: this.skyShift, width: skyWidth, height: skyHeight };
+    } else {
+      this.skyShift = 0;
+      this.lastDrawAt = null;
+      this.fit = baseFit;
+    }
     const fit = this.fit;
     if (video && video.readyState >= 2) {
       ctx.save(); ctx.translate(fit.x + fit.width, fit.y); ctx.scale(-1, 1);
       ctx.globalAlpha = field ? 0.32 : 1;
       ctx.drawImage(video, crop.x * video.videoWidth, crop.y * video.videoHeight, sw, sh, 0, 0, fit.width, fit.height); ctx.restore();
-    } else {
+      if (this.skyStage) {
+        if (fit.y > 2) {
+          const topRgb = skyRgbAt(fit.y / h);
+          const seam = ctx.createLinearGradient(0, fit.y, 0, fit.y + 54);
+          seam.addColorStop(0, `rgba(${topRgb}, 1)`);
+          seam.addColorStop(0.55, `rgba(${topRgb}, 0.5)`);
+          seam.addColorStop(1, `rgba(${topRgb}, 0)`);
+          ctx.fillStyle = seam;
+          ctx.fillRect(fit.x - 1, fit.y - 1, fit.width + 2, 56);
+        }
+        if (fit.x > 4) {
+          const sideRgb = skyRgbAt(Math.min(1, (fit.y + Math.max(0, h - fit.y) * 0.5) / h));
+          const leftFade = ctx.createLinearGradient(fit.x, 0, fit.x + 36, 0);
+          leftFade.addColorStop(0, `rgba(${sideRgb}, 1)`);
+          leftFade.addColorStop(1, `rgba(${sideRgb}, 0)`);
+          ctx.fillStyle = leftFade;
+          ctx.fillRect(fit.x - 1, Math.max(0, fit.y), 38, h - Math.max(0, fit.y));
+          const rightFade = ctx.createLinearGradient(fit.x + fit.width, 0, fit.x + fit.width - 36, 0);
+          rightFade.addColorStop(0, `rgba(${sideRgb}, 1)`);
+          rightFade.addColorStop(1, `rgba(${sideRgb}, 0)`);
+          ctx.fillStyle = rightFade;
+          ctx.fillRect(fit.x + fit.width - 37, Math.max(0, fit.y), 38, h - Math.max(0, fit.y));
+        }
+      }
+    } else if (!this.skyStage) {
       ctx.fillStyle = this.background; ctx.fillRect(fit.x, fit.y, fit.width, fit.height);
       if (this.illustration.complete && this.illustration.naturalWidth) { ctx.globalAlpha = this.illustrationOpacity; ctx.drawImage(this.illustration, fit.x, fit.y, fit.width, fit.height); ctx.globalAlpha = 1; }
       ctx.strokeStyle = '#c9bcdf'; ctx.lineWidth = 1;
