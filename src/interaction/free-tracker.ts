@@ -4,6 +4,8 @@ import { validLandmark } from './geometry.ts';
 import { HoldGesture } from './raise.ts';
 import { signatureSimilarity } from '../vision/stereo-depth.ts';
 
+export type ParticipantBindingState = { phase: 'unbound' | 'preparing' | 'bound' | 'waiting'; boundCount: number; observedCount: number; ignoredCount: number; ambiguous: boolean };
+
 type JointState = { x: OneEuroFilter; y: OneEuroFilter; raw: Point | null; lastAt: number | null };
 
 type Candidate = {
@@ -25,8 +27,11 @@ type Slot = {
   depthConfidence: number;
   realShoulderMeters: number | null;
   appearance: number[] | null;
+  referenceAppearance: number[] | null;
+  referenceShoulderMeters: number | null;
   lastSeen: number;
   observations: number;
+  present: boolean;
   armJoints: [JointState, JointState, JointState, JointState];
   wrists: [JointState, JointState];
   raisedSides: [boolean, boolean];
@@ -153,10 +158,49 @@ function stabilizeArmJoint(state: JointState, landmark: Landmark, centerShift: P
   return point;
 }
 
+function identityAppearance(slot: Slot): number[] | null {
+  return slot.referenceAppearance ?? slot.appearance;
+}
+
+function compatibleAppearance(slot: Slot, candidate: Candidate): boolean {
+  const reference = identityAppearance(slot);
+  return !reference || !candidate.measurement.appearance || signatureSimilarity(reference, candidate.measurement.appearance) >= 0.4;
+}
+
+function predictedDistance(slot: Slot, candidate: Candidate, time: number): number {
+  const elapsed = Math.max(0, Math.min((time - slot.lastSeen) / 1000, 0.22));
+  return distance({ x: clamp(slot.center.x + slot.velocity.x * elapsed, 0, 1), y: clamp(slot.center.y + slot.velocity.y * elapsed, 0, 1) }, candidate.center);
+}
+
+function accountedElsewhere(slot: Slot, candidate: Candidate, candidates: Candidate[], time: number): boolean {
+  return time - slot.lastSeen <= 250 && candidates.some(other => other !== candidate && compatibleAppearance(slot, other) && Math.min(predictedDistance(slot, other, time), distance(slot.center, other.center)) < Math.max(0.045, slot.shoulderWidth * 0.4));
+}
+
+function participantCandidate(slot: Slot, candidate: Candidate, room: Slot[], candidates: Candidate[], time: number, recovery = false, preparation = false): boolean {
+  if (!compatibleAppearance(slot, candidate)) return false;
+  if (!slot.confirmed && (!preparation || slot.raisedSince === null)) return true;
+  const ownDistance = predictedDistance(slot, candidate, time);
+  const competitors = room.filter(other => other.id !== slot.id && compatibleAppearance(other, candidate) && !(preparation && !slot.confirmed && !other.confirmed && other.lastSeen + 40 < slot.lastSeen) && !accountedElsewhere(other, candidate, candidates, time));
+  const appearance = candidate.measurement.appearance;
+  const reference = identityAppearance(slot);
+  const ownScaleError = Math.abs(Math.log(candidate.shoulderWidth / slot.shoulderWidth));
+  const indistinct = (other: Slot) => !appearance || !reference || !identityAppearance(other) || signatureSimilarity(identityAppearance(other), appearance) >= signatureSimilarity(reference, appearance) - 0.12;
+  if (competitors.some(other => time - other.lastSeen <= 1500 && indistinct(other) && Math.abs(Math.log(candidate.shoulderWidth / other.shoulderWidth)) + 0.18 < ownScaleError)) return false;
+  if (competitors.some(other => time - other.lastSeen <= 700 && indistinct(other) && Math.abs(Math.log(candidate.shoulderWidth / other.shoulderWidth)) <= ownScaleError + 0.12 && matchScore(other, candidate, time, null) !== null)) return false;
+  if (competitors.some(other => time - other.lastSeen <= 700 && predictedDistance(other, candidate, time) <= Math.max(0.055, other.shoulderWidth * 0.65) && (other.lastSeen > slot.lastSeen + 40 || Math.abs(predictedDistance(other, candidate, time) - ownDistance) < 0.06))) return false;
+  if (competitors.length > 0 && slot.referenceShoulderMeters && candidate.measurement.depthConfidence >= 0.7 && candidate.measurement.realShoulderMeters && (candidate.measurement.realShoulderMeters / slot.referenceShoulderMeters < 0.6 || candidate.measurement.realShoulderMeters / slot.referenceShoulderMeters > 1.7)) return false;
+  if (!recovery && slot.present && time - slot.lastSeen <= 400) return true;
+  if (!recovery && time - slot.lastSeen <= 400 && ownDistance < Math.max(0.06, slot.shoulderWidth * 0.5) && reference && appearance && signatureSimilarity(reference, appearance) >= 0.9) return true;
+  if (!reference || !appearance || signatureSimilarity(reference, appearance) < 0.82) return false;
+  const similarity = signatureSimilarity(reference, appearance);
+  return !competitors.some(other => identityAppearance(other) && signatureSimilarity(identityAppearance(other), appearance) >= similarity - 0.12);
+}
+
 function matchScore(slot: Slot, candidate: Candidate, time: number, maxPlayDepth: number | null): number | null {
+  if (!compatibleAppearance(slot, candidate)) return null;
   const elapsed = Math.max(0, (time - slot.lastSeen) / 1000);
   const candDepth = candidate.measurement.depthConfidence >= 0.52 ? candidate.measurement.depthMeters : null;
-  if (maxPlayDepth !== null && candDepth !== null && candDepth > maxPlayDepth + 1.35) {
+  if (slot.confirmed && maxPlayDepth !== null && candDepth !== null && candDepth > maxPlayDepth + 1.35) {
     return null;
   }
   const predictionSeconds = Math.min(elapsed, 0.22);
@@ -164,7 +208,7 @@ function matchScore(slot: Slot, candidate: Candidate, time: number, maxPlayDepth
     x: clamp(slot.center.x + slot.velocity.x * predictionSeconds, 0, 1),
     y: clamp(slot.center.y + slot.velocity.y * predictionSeconds, 0, 1),
   };
-  const disp = distance(predicted, candidate.center);
+  const disp = Math.min(distance(predicted, candidate.center), distance(slot.center, candidate.center) + 0.015);
   const maxDisp = Math.min(1.15, Math.max(0.32, Math.max(slot.shoulderWidth, candidate.shoulderWidth) * 2.4) + elapsed * 1.15);
   if (disp > maxDisp) return null;
   let depthPenalty = 0;
@@ -181,14 +225,14 @@ function matchScore(slot: Slot, candidate: Candidate, time: number, maxPlayDepth
     scalePenalty = Math.abs(Math.log(candidate.shoulderWidth / slot.shoulderWidth)) * 0.06;
   }
   let appearancePenalty = 0;
-  if (slot.appearance && candidate.measurement.appearance) {
-    const sim = signatureSimilarity(slot.appearance, candidate.measurement.appearance);
+  if (identityAppearance(slot) && candidate.measurement.appearance) {
+    const sim = signatureSimilarity(identityAppearance(slot), candidate.measurement.appearance);
     appearancePenalty = (1 - sim) * 0.32;
   }
-  return disp + depthPenalty + scalePenalty + appearancePenalty;
+  return disp + depthPenalty + scalePenalty + appearancePenalty + Math.min(0.35, elapsed * 0.18);
 }
 
-function assignBest(slots: Slot[], candidates: Candidate[], time: number, maxPlayDepth: number | null): Map<number, number> {
+function assignBest(slots: Slot[], candidates: Candidate[], time: number, maxPlayDepth: number | null, room: Slot[] = slots, locked = false, preparation = false): Map<number, number> {
   let bestPairs = new Map<number, number>();
   let bestCost = Number.POSITIVE_INFINITY;
   const search = (index: number, pairs: Map<number, number>, used: Set<number>, cost: number): void => {
@@ -201,6 +245,7 @@ function assignBest(slots: Slot[], candidates: Candidate[], time: number, maxPla
     }
     for (let c = 0; c < candidates.length; c += 1) {
       if (used.has(c)) continue;
+      if ((locked || preparation) && !participantCandidate(slots[index], candidates[c], room, candidates, time, false, preparation)) continue;
       const next = matchScore(slots[index], candidates[c], time, maxPlayDepth);
       if (next === null) continue;
       pairs.set(index, c);
@@ -228,6 +273,9 @@ export class FreeMotionTracker {
   private readonly count: 1 | 2;
   private slots: Slot[] = [];
   private locked = false;
+  private boundIds = new Set<number>();
+  private roomCount = 0;
+  private ambiguous = false;
   private nextId = 1;
   private lastAt: number | null = null;
   private lastPlayers: TrackedPlayer[] = [];
@@ -251,19 +299,29 @@ export class FreeMotionTracker {
   }
 
   isCalibrated(): boolean {
-    return this.slots.filter(slot => slot.confirmed).length >= this.count;
+    return this.locked && this.boundIds.size === this.count;
   }
 
   lock(): void {
     const confirmed = this.slots.filter(slot => slot.confirmed).slice(0, this.count);
     if (confirmed.length >= this.count) {
-      this.slots = confirmed;
+      if (!confirmed.every(slot => slot.lastSeen === this.lastAt)) return;
+      this.boundIds = new Set(confirmed.map(slot => slot.id));
       this.locked = true;
     }
   }
 
+  boundPlayerIds(): number[] { return [...this.boundIds]; }
+
+  canStart(): boolean { return this.isCalibrated() && this.lastPlayers.length === this.count && this.lastPlayers.every(player => this.boundIds.has(player.id) && validLandmark(player.landmarks[11]) && validLandmark(player.landmarks[12])); }
+
+  bindingState(): ParticipantBindingState {
+    return { phase: this.locked ? this.canStart() ? 'bound' : 'waiting' : this.readyCount() > 0 || this.lastPlayers.some(player => player.raised) ? 'preparing' : 'unbound', boundCount: this.locked ? this.boundIds.size : this.readyCount(), observedCount: this.lastPlayers.length, ignoredCount: Math.max(0, this.roomCount - this.lastPlayers.length), ambiguous: this.ambiguous };
+  }
+
   unlock(): void {
     this.locked = false;
+    this.boundIds.clear();
     for (const slot of this.slots) {
       slot.confirmed = false;
       slot.hold.reset();
@@ -273,149 +331,81 @@ export class FreeMotionTracker {
   reset(): void {
     this.slots = [];
     this.locked = false;
+    this.boundIds.clear(); this.roomCount = 0; this.ambiguous = false;
     this.lastAt = null;
     this.lastPlayers = [];
     this.diagnostic = 'idle';
   }
 
-  update(poses: PoseObservation[], measurements: StereoMeasurement[], timestamp: number): TrackedPlayer[] {
-    if (!Number.isFinite(timestamp)) {
-      this.reset();
-      this.diagnostic = 'clock_invalid';
-      return [];
+  update(poses: PoseObservation[], measurements: StereoMeasurement[], timestamp: number, allowEnrollment = true): TrackedPlayer[] {
+    if (!Number.isFinite(timestamp) || this.lastAt !== null && timestamp < this.lastAt) {
+      this.reset(); this.diagnostic = 'clock_invalid'; return [];
     }
-    if (this.lastAt !== null && timestamp < this.lastAt) {
-      this.reset();
-      this.lastAt = timestamp;
-      this.diagnostic = 'clock_invalid';
-      return [];
-    }
-    if (timestamp === this.lastAt) {
-      return this.lastPlayers.map(copyPlayer);
-    }
+    if (timestamp === this.lastAt) return this.lastPlayers.map(copyPlayer);
     this.lastAt = timestamp;
     const emptyMeasurement: StereoMeasurement = { depthMeters: null, depthConfidence: 0, realShoulderMeters: null, disparityPx: null, appearance: null };
-    const candidates = (Array.isArray(poses) ? poses : [])
-      .map((pose, index) => candidateFor(pose, measurements[index] ?? emptyMeasurement))
-      .filter((item): item is Candidate => item !== null)
-      .slice(0, 6);
-
-    if (!this.locked) {
-      this.slots = this.slots.filter(slot => timestamp - slot.lastSeen <= 1500);
+    const candidates = (Array.isArray(poses) ? poses : []).map((pose, index) => candidateFor(pose, measurements[index] ?? emptyMeasurement)).filter((item): item is Candidate => item !== null).slice(0, 6).filter((candidate, index, all) => !all.slice(0, index).some(previous => distance(previous.center, candidate.center) < 0.025 && Math.abs(Math.log(previous.shoulderWidth / candidate.shoulderWidth)) < 0.12));
+    this.roomCount = candidates.length;
+    this.ambiguous = false;
+    if (!this.locked) this.slots = this.slots.filter(slot => timestamp - slot.lastSeen <= 1500);
+    const room = [...this.slots];
+    const orderedSlots = [...room].sort((a, b) => Number(b.confirmed) - Number(a.confirmed) || b.lastSeen - a.lastSeen || a.id - b.id).slice(0, 6);
+    const activeDepths = room.filter(slot => this.boundIds.has(slot.id)).map(slot => slot.depthMeters).filter((value): value is number => value !== null);
+    const maxPlayDepth = this.locked && activeDepths.length ? Math.max(...activeDepths) : null;
+    const matches = assignBest(orderedSlots, candidates, timestamp, maxPlayDepth, room, this.locked, !this.locked);
+    const used = new Set(matches.values());
+    const observed = new Map<number, TrackedPlayer>();
+    for (const [slotIndex, candidateIndex] of matches) {
+      const slot = orderedSlots[slotIndex];
+      observed.set(slot.id, this.observe(slot, candidates[candidateIndex], timestamp));
     }
-
-    const activeDepths = this.slots.map(slot => slot.depthMeters).filter((d): d is number => d !== null);
-    const maxPlayDepth = this.locked && activeDepths.length > 0 ? Math.max(...activeDepths) : null;
-
-    const orderedSlots = [...this.slots].sort((a, b) => (b.confirmed ? 1 : 0) - (a.confirmed ? 1 : 0) || a.id - b.id);
-    const matches = assignBest(orderedSlots, candidates, timestamp, maxPlayDepth);
-    const usedCandidates = new Set<number>(matches.values());
-    const observedPlayers: TrackedPlayer[] = [];
-    const matchedSlotIds = new Set<number>();
-
-    for (const [slotIdx, candIdx] of matches) {
-      const slot = orderedSlots[slotIdx];
-      matchedSlotIds.add(slot.id);
-      observedPlayers.push(this.observe(slot, candidates[candIdx], timestamp));
-    }
-
     if (this.locked) {
-      const missingSlots = orderedSlots.filter(slot => !matchedSlotIds.has(slot.id));
-      const freeCandidates = candidates
-        .map((candidate, index) => ({ candidate, index }))
-        .filter(item => !usedCandidates.has(item.index));
-
-      for (const slot of missingSlots) {
-        if (freeCandidates.length === 0) {
-          slot.armJoints.forEach(resetJoint);
-          slot.wrists.forEach(resetJoint);
-          slot.raisedSides = [false, false];
-          continue;
-        }
-        let bestIdx = -1;
-        let bestScore = Number.POSITIVE_INFINITY;
-        for (let i = 0; i < freeCandidates.length; i += 1) {
-          const cand = freeCandidates[i].candidate;
-          const candDepth = cand.measurement.depthConfidence >= 0.52 ? cand.measurement.depthMeters : null;
-          if (maxPlayDepth !== null && candDepth !== null && candDepth > maxPlayDepth + 1.6) continue;
-          const simPenalty = slot.appearance && cand.measurement.appearance ? (1 - signatureSimilarity(slot.appearance, cand.measurement.appearance)) * 0.5 : 0.25;
-          const sizePenalty = slot.realShoulderMeters && cand.measurement.realShoulderMeters
-            ? Math.abs(Math.log(cand.measurement.realShoulderMeters / slot.realShoulderMeters)) * 0.35
-            : Math.abs(Math.log(cand.shoulderWidth / slot.shoulderWidth)) * 0.15;
-          const distPenalty = distance(slot.center, cand.center) * 0.35;
-          const score = simPenalty + sizePenalty + distPenalty;
-          if (score < bestScore) {
-            bestScore = score;
-            bestIdx = i;
-          }
-        }
-        if (bestIdx >= 0) {
-          const picked = freeCandidates.splice(bestIdx, 1)[0];
-          matchedSlotIds.add(slot.id);
-          observedPlayers.push(this.observe(slot, picked.candidate, timestamp));
+      for (const slot of room.filter(item => this.boundIds.has(item.id) && !observed.has(item.id))) {
+        const available = candidates.map((candidate, index) => ({ candidate, index })).filter(item => !used.has(item.index));
+        const accepted = available.filter(item => participantCandidate(slot, item.candidate, room, candidates, timestamp, true)).sort((a, b) => predictedDistance(slot, a.candidate, timestamp) - predictedDistance(slot, b.candidate, timestamp));
+        if (accepted.length === 1) {
+          const hit = accepted[0]; used.add(hit.index); observed.set(slot.id, this.observe(slot, hit.candidate, timestamp));
         } else {
-          slot.armJoints.forEach(resetJoint);
-          slot.wrists.forEach(resetJoint);
-          slot.raisedSides = [false, false];
+          this.ambiguous ||= available.length > 0;
         }
       }
-      this.diagnostic = observedPlayers.length >= this.count ? 'ok' : observedPlayers.length > 0 ? 'partner_missing' : 'no_player';
-      this.lastPlayers = observedPlayers.sort((a, b) => a.id - b.id);
+    }
+    for (let index = 0; index < candidates.length; index += 1) {
+      if (used.has(index)) continue;
+      const slot = this.createSlot(candidates[index], timestamp);
+      this.slots.push(slot); observed.set(slot.id, this.observe(slot, candidates[index], timestamp));
+    }
+    for (const slot of this.slots) {
+      if (observed.has(slot.id)) continue;
+      slot.present = false;
+      slot.present = false; slot.raisedSince = null;
+      slot.armJoints.forEach(resetJoint); slot.wrists.forEach(resetJoint); slot.raisedSides = [false, false]; slot.hold.update(false, timestamp);
+      if (!this.locked && timestamp - slot.lastSeen > 1200) slot.confirmed = false;
+    }
+    this.slots = this.slots.sort((a, b) => Number(b.confirmed) - Number(a.confirmed) || b.lastSeen - a.lastSeen).slice(0, 12);
+    if (this.locked) {
+      this.lastPlayers = [...this.boundIds].flatMap(id => observed.has(id) ? [observed.get(id)!] : []).sort((a, b) => a.id - b.id);
+      this.diagnostic = this.canStart() ? 'ok' : this.ambiguous ? 'identity_uncertain' : this.lastPlayers.length ? 'partner_missing' : 'no_player';
       return this.lastPlayers.map(copyPlayer);
     }
-
-    for (let index = 0; index < candidates.length; index += 1) {
-      if (usedCandidates.has(index)) continue;
-      const cand = candidates[index];
-      const slot = this.createSlot(cand, timestamp);
-      this.slots.push(slot);
-      matchedSlotIds.add(slot.id);
-      observedPlayers.push(this.observe(slot, cand, timestamp));
-    }
-
+    const confirmed = [...observed.values()].filter(player => this.slots.some(slot => slot.id === player.id && slot.confirmed));
+    const raising = [...observed.values()].filter(player => !confirmed.some(item => item.id === player.id) && player.raised && player.wrists.some(Boolean) && validLandmark(player.landmarks[11]) && validLandmark(player.landmarks[12]));
+    const tooMany = raising.length > this.count - this.readyCount();
+    const separated = raising.every((first, index) => raising.slice(index + 1).every(second => distance(first.center, second.center) >= Math.max(0.08, (first.shoulderWidth + second.shoulderWidth) * 0.35)));
+    this.ambiguous = tooMany || !separated;
+    const enrollingIds = new Set(!tooMany && separated ? raising.map(player => player.id) : []);
     for (const slot of this.slots) {
-      if (!matchedSlotIds.has(slot.id)) {
-        slot.hold.update(false, timestamp);
-        slot.armJoints.forEach(resetJoint);
-        slot.wrists.forEach(resetJoint);
-        slot.raisedSides = [false, false];
-        if (timestamp - slot.lastSeen > 1200) slot.confirmed = false;
+      if (slot.confirmed) continue;
+      if (slot.hold.update(allowEnrollment && enrollingIds.has(slot.id), timestamp)) {
+        slot.confirmed = true;
+        slot.referenceAppearance = slot.appearance ? [...slot.appearance] : null;
+        slot.referenceShoulderMeters = slot.realShoulderMeters;
       }
     }
-
-    const ranked = observedPlayers.map(player => {
-      const slot = this.slots.find(item => item.id === player.id)!;
-      const depthBoost = slot.depthMeters !== null ? Math.max(0, 3.2 - slot.depthMeters) * 0.12 : 0;
-      const holdMs = slot.raisedSince !== null ? timestamp - slot.raisedSince : 0;
-      const score = (slot.confirmed ? 100 : 0) + (player.raised ? 20 : 0) + Math.min(10, holdMs / 200) + player.shoulderWidth * 4 + depthBoost - Math.abs(player.center.x - 0.5) * 0.4;
-      return { player, slot, score };
-    }).sort((a, b) => b.score - a.score);
-
-    const chosen = ranked.slice(0, this.count);
-    let anyHold = false;
-    let missingWrist = false;
-    for (const item of chosen) {
-      const hasWrist = item.player.wrists.some(Boolean);
-      if (!hasWrist) missingWrist = true;
-      if (item.player.raised && hasWrist) anyHold = true;
-      if (item.slot.hold.update(item.player.raised && hasWrist, timestamp)) {
-        item.slot.confirmed = true;
-      }
-    }
-    if (this.slots.length > 6) {
-      this.slots = this.slots
-        .sort((a, b) => (b.confirmed ? 1 : 0) - (a.confirmed ? 1 : 0) || b.lastSeen - a.lastSeen)
-        .slice(0, 6);
-    }
-    if (this.isCalibrated()) {
-      this.diagnostic = 'ready';
-      this.lock();
-    } else if (chosen.length === 0) {
-      this.diagnostic = 'no_player';
-    } else {
-      this.diagnostic = anyHold ? 'holding' : missingWrist ? 'no_wrist' : 'hand_not_raised';
-    }
-    this.lastPlayers = chosen.map(item => item.player).sort((a, b) => a.id - b.id);
+    if (this.readyCount() >= this.count) this.lock();
+    const eligible = this.locked ? [...observed.values()].filter(player => this.boundIds.has(player.id)) : [...confirmed, ...raising].slice(0, this.count);
+    this.lastPlayers = eligible.sort((a, b) => a.id - b.id);
+    this.diagnostic = this.locked ? this.canStart() ? 'ready' : 'partner_missing' : tooMany ? 'too_many_raising' : !separated ? 'not_separated' : raising.length ? 'holding' : candidates.length ? 'hand_not_raised' : 'no_player';
     return this.lastPlayers.map(copyPlayer);
   }
 
@@ -459,8 +449,11 @@ export class FreeMotionTracker {
       depthConfidence: cand.measurement.depthConfidence,
       realShoulderMeters: cand.measurement.depthConfidence >= 0.55 ? cand.measurement.realShoulderMeters : null,
       appearance: cand.measurement.appearance ? [...cand.measurement.appearance] : null,
+      referenceAppearance: null,
+      referenceShoulderMeters: null,
       lastSeen: timestamp,
       observations: 0,
+      present: true,
       armJoints: [createJoint(1.4, 1.5), createJoint(1.4, 1.5), createJoint(1.4, 1.5), createJoint(1.4, 1.5)],
       wrists: [createJoint(1.6, 1.8), createJoint(1.6, 1.8)],
       raisedSides: [false, false],
@@ -499,7 +492,10 @@ export class FreeMotionTracker {
       slot.realShoulderMeters = slot.realShoulderMeters === null ? cand.measurement.realShoulderMeters : slot.realShoulderMeters * 0.8 + cand.measurement.realShoulderMeters * 0.2;
     }
     slot.appearance = blendAppearance(slot.appearance, cand.measurement.appearance);
+    if (!slot.confirmed && slot.observations === 2) slot.referenceAppearance = slot.appearance ? [...slot.appearance] : null;
+    slot.present = true;
     slot.lastSeen = timestamp;
+    slot.present = true;
     slot.observations += 1;
     const enterOffset = Math.max(0.015, cand.shoulderWidth * 0.15);
     const exitOffset = enterOffset * 0.45;

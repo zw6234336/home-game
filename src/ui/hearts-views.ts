@@ -11,10 +11,13 @@ function treasureShelf(): string {
   return '<div class="treasure-shelf">' + (['slipper', 'handbag', 'dress', 'crown'] as TreasureArt[]).map(name => '<div class="treasure-card">' + artImage(name) + '<span>' + gameArtCatalog[name].label + '</span><b>+' + gameArtCatalog[name].points + '</b></div>').join('') + '</div>';
 }
 
+export function heartsTreasures(): string {
+  return treasureShelf() + '<div class="costume-preview">' + artImage('bomb') + '<span>接到炸弹？<b>噗，变个可爱的脸！</b></span><div>' + artImage('donkey') + artImage('piglet') + '</div></div>';
+}
+
 export function heartsFeature(): string {
   return '<section class="feature-scene hearts-feature" aria-label="爱心雨游戏介绍"><div class="feature-heading"><small>A LITTLE FAIRYTALE, TOGETHER</small><h2>爱心雨 · 童话奇遇</h2></div>' +
-    '<div class="round-stamp"><b>60</b><span>秒惊喜</span></div>' + treasureShelf() +
-    '<div class="costume-preview">' + artImage('bomb') + '<span>接到炸弹？<b>噗，变个可爱的脸！</b></span><div>' + artImage('donkey') + artImage('piglet') + '</div></div>' +
+    '<div class="round-stamp"><b>60</b><span>秒惊喜</span></div>' + heartsTreasures() +
     '<div class="scene-labels"><span>爱心与宝物一起接</span><span>三种搞怪变身</span><span>一人接，大家笑</span></div></section>';
 }
 

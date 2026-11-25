@@ -1,13 +1,16 @@
-import type { CropRect, Rect, TrackedPlayer, VisionFrame } from '../types.ts';
+import type { HandObservation, CropRect, Rect, TrackedPlayer, VisionFrame } from '../types.ts';
 import { framingFit, toStage, validLandmark } from '../interaction/geometry.ts';
 import { faceAnchor, HeadwearTracker } from '../interaction/headwear.ts';
 import { scene } from './scene.mjs';
 import { drawCostumeFace, drawDemoFace } from './storybook-art.ts';
 import type { FaceEffect } from '../game/costumes.ts';
 import { drawUnicornPony } from './unicorn.ts';
+import { adventureWorlds, type AdventureWorld } from '../art/worlds.ts';
+import { worldArt } from '../platform/world-art.ts';
+import { stagePixelRatio } from '../platform/television.ts';
 
 export type StageField = { draw(ctx: CanvasRenderingContext2D, fit: Rect): void; clearTrails(): void; faceEffect?(playerId: number): FaceEffect | null };
-export type StageOptions = { illustration?: string; opacity?: number; background?: string; demoFaces?: boolean; skyStage?: boolean };
+export type StageOptions = { world?: AdventureWorld; illustration?: string; opacity?: number; background?: string; demoFaces?: boolean; skyStage?: boolean };
 
 function drawCloud(ctx: CanvasRenderingContext2D, x: number, y: number, scale: number, alpha: number) {
   ctx.save();
@@ -65,6 +68,7 @@ export class Stage {
   readonly ctx: CanvasRenderingContext2D;
   fit: Rect = { x: 0, y: 0, width: 1, height: 1 };
   private size = '';
+  private world: AdventureWorld | undefined;
   private illustration = new Image();
   private illustrationMarkup = '';
   private illustrationOpacity: number;
@@ -73,13 +77,16 @@ export class Stage {
   private headwear = new HeadwearTracker();
   private faces = new HeadwearTracker(faceAnchor);
   private demoFaces: boolean;
+  private televisionPresentation = false;
+  private primaryControllerId: number | null = null;
   private skyStage: boolean;
   private skyShift = 0;
   private lastDrawAt: number | null = null;
   constructor(canvas: HTMLCanvasElement, options?: StageOptions) {
+    this.world = options?.world;
     this.setIllustration(options?.illustration ?? scene(2, false));
     this.illustrationOpacity = options?.opacity ?? .14;
-    this.background = options?.background ?? '#d9cef2';
+    this.background = options?.background ?? (options?.world ? adventureWorlds[options.world].ground : '#d9cef2');
     this.demoFaces = options?.demoFaces ?? false;
     this.skyStage = options?.skyStage ?? false;
     this.canvas = canvas;
@@ -90,18 +97,20 @@ export class Stage {
     this.illustrationMarkup = markup;
     this.illustration.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(markup);
   }
+  setPrimaryController(id: number | null) { this.primaryControllerId = id; }
+  setTelevisionPresentation(active: boolean) { this.televisionPresentation = active; }
   setFraming(rect: Rect) {
     framingFit(1, 1, 1, 1, rect);
     this.framing = { ...rect };
   }
-  draw(video: HTMLVideoElement | null, crop: CropRect, players: TrackedPlayer[], frame: VisionFrame | null, field: StageField | null, now: number) {
+  draw(video: HTMLVideoElement | null, crop: CropRect, players: TrackedPlayer[], frame: VisionFrame | null, field: StageField | null, now: number, hands: readonly HandObservation[] = []) {
     const w = this.canvas.clientWidth;
     const h = this.canvas.clientHeight;
     if (!w || !h) return;
-    const dpr = Math.min(devicePixelRatio, 1.5);
+    const dpr = stagePixelRatio(w, h, devicePixelRatio);
     const size = w + '/' + h + '/' + dpr;
     if (this.size !== size) {
-      this.canvas.width = Math.round(w * dpr); this.canvas.height = Math.round(h * dpr); this.size = size; field?.clearTrails();
+      this.canvas.width = Math.floor(w * dpr); this.canvas.height = Math.floor(h * dpr); this.size = size; field?.clearTrails();
     }
     const ctx = this.ctx;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -168,9 +177,19 @@ export class Stage {
       }
     } else if (!this.skyStage) {
       ctx.fillStyle = this.background; ctx.fillRect(fit.x, fit.y, fit.width, fit.height);
-      if (this.illustration.complete && this.illustration.naturalWidth) { ctx.globalAlpha = this.illustrationOpacity; ctx.drawImage(this.illustration, fit.x, fit.y, fit.width, fit.height); ctx.globalAlpha = 1; }
+      if (!(field && this.world && worldArt.get(this.world)) && this.illustration.complete && this.illustration.naturalWidth) { ctx.globalAlpha = this.illustrationOpacity; ctx.drawImage(this.illustration, fit.x, fit.y, fit.width, fit.height); ctx.globalAlpha = 1; }
       ctx.strokeStyle = '#c9bcdf'; ctx.lineWidth = 1;
       if (this.illustrationOpacity < 1) for (let x = 24; x < w; x += 48) { ctx.beginPath(); ctx.moveTo(x, h); ctx.lineTo(x + 30, h - 70); ctx.stroke(); }
+    }
+    const worldImage = !video && field && this.world ? worldArt.get(this.world) : null;
+    if (worldImage) {
+      const scale = Math.max(w / worldImage.naturalWidth, h / worldImage.naturalHeight);
+      const width = worldImage.naturalWidth * scale;
+      const height = worldImage.naturalHeight * scale;
+      ctx.save();
+      ctx.globalAlpha = this.skyStage ? 0.1 : 0.14;
+      ctx.drawImage(worldImage, (w - width) / 2, (h - height) / 2, width, height);
+      ctx.restore();
     }
     if (frame && now - frame.capturedAt <= 150) {
       this.headwear.prune(new Set(players.map(player => player.id)));
@@ -196,7 +215,7 @@ export class Stage {
           const p = toStage(hand, fit); ctx.fillStyle = '#ffffff'; ctx.beginPath(); ctx.arc(p.x, p.y, 13, 0, 7); ctx.fill(); ctx.stroke();
         }
       });
-      if (now - frame.handsCapturedAt <= 150) for (const hand of frame.hands) {
+      if (now - frame.handsCapturedAt <= 150) for (const hand of hands) {
         ctx.fillStyle = '#f9da78';
         for (const landmark of hand.landmarks) if (validLandmark(landmark)) { const p = toStage(landmark, fit); ctx.beginPath(); ctx.arc(p.x, p.y, 2.8, 0, 7); ctx.fill(); }
       }
@@ -205,6 +224,14 @@ export class Stage {
       this.faces.reset();
     }
     field?.draw(ctx, fit);
-    if (this.demoFaces) drawDemoFace(ctx, w - 92, 100, 48, field?.faceEffect?.(1) ?? null);
+    const controller = frame && now - frame.capturedAt <= 150 ? players.find(player => player.id === this.primaryControllerId) : null;
+    if (controller && validLandmark(controller.landmarks[11]) && validLandmark(controller.landmarks[12])) {
+      const anchor = toStage({ x: (controller.landmarks[11].x + controller.landmarks[12].x) / 2, y: (controller.landmarks[11].y + controller.landmarks[12].y) / 2 }, fit);
+      const x = Math.max(52, Math.min(w - 52, anchor.x));
+      const y = Math.max(18, Math.min(h - 34, anchor.y + 28));
+      ctx.save(); ctx.fillStyle = '#395f53'; ctx.beginPath(); ctx.roundRect(x - 49, y, 98, 28, 14); ctx.fill();
+      ctx.fillStyle = '#ffffff'; ctx.font = '600 14px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('主控伙伴', x, y + 14); ctx.restore();
+    }
+    if (this.demoFaces) drawDemoFace(ctx, w - 92, this.televisionPresentation ? 230 : 100, 48, field?.faceEffect?.(1) ?? null);
   }
 }

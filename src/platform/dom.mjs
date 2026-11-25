@@ -7,7 +7,7 @@ export function renderMarkup(target, markup) {
     if (!tags.has(element.localName.toLowerCase())) { element.remove(); continue; }
     for (const attribute of [...element.attributes]) {
       const name = attribute.name.toLowerCase();
-      const localImage = element.localName === 'img' && (name === 'src' && /^\/art\/storybook-v1\/[a-z0-9-]+\.webp$/.test(attribute.value) || name === 'alt' || name === 'decoding');
+      const localImage = element.localName === 'img' && (name === 'src' && /^\/art\/(?:storybook-v1|adventures-v1)\/[a-z0-9-]+\.webp$/.test(attribute.value) || name === 'alt' || name === 'decoding');
       const allowed = attributes.has(name) || localImage || name.startsWith('aria-') || name.startsWith('data-');
       const externalPaint = /url\s*\(/i.test(attribute.value) && !/^url\(#[a-zA-Z][\w-]*\)$/.test(attribute.value);
       if (!allowed || externalPaint) element.removeAttribute(attribute.name);

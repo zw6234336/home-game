@@ -1,0 +1,52 @@
+{
+  "bubbles.webp": {
+    "width": 1440,
+    "height": 960,
+    "bytes": 82688
+  },
+  "bubbles-thumb.webp": {
+    "width": 240,
+    "height": 160,
+    "bytes": 5122
+  },
+  "poses.webp": {
+    "width": 1440,
+    "height": 960,
+    "bytes": 143394
+  },
+  "poses-thumb.webp": {
+    "width": 240,
+    "height": 160,
+    "bytes": 7742
+  },
+  "hearts.webp": {
+    "width": 1440,
+    "height": 960,
+    "bytes": 120890
+  },
+  "hearts-thumb.webp": {
+    "width": 240,
+    "height": 160,
+    "bytes": 6754
+  },
+  "gates.webp": {
+    "width": 1440,
+    "height": 960,
+    "bytes": 129566
+  },
+  "gates-thumb.webp": {
+    "width": 240,
+    "height": 160,
+    "bytes": 7220
+  },
+  "bridge.webp": {
+    "width": 1440,
+    "height": 960,
+    "bytes": 91884
+  },
+  "bridge-thumb.webp": {
+    "width": 240,
+    "height": 160,
+    "bytes": 5136
+  }
+}
