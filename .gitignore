@@ -4,3 +4,4 @@ public/models/*.task
 public/wasm/
 public/asset-manifest.json
 .DS_Store
+.ps4eye/

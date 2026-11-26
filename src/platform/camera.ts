@@ -1,6 +1,48 @@
 import type { CropRect } from '../types.ts';
 
 export type CropPreset = 'left' | 'right' | 'left-near' | 'full';
+export type Ps4EyeEnsureResult = { state: string; ready: boolean; initializedNow: boolean; message: string };
+
+export function isPs4CameraLabel(label: string): boolean {
+  return /ov580|playstation|ps4\s*camera|ps4eye/i.test(label);
+}
+
+export function pickPreferredCameraId(devices: readonly { deviceId: string; label: string }[]): string | undefined {
+  for (const device of devices) {
+    if (device.deviceId && isPs4CameraLabel(device.label)) return device.deviceId;
+  }
+  return undefined;
+}
+
+export function settleCameraDelay(ms = 450): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+export async function ensureLocalPs4Camera(fetchFn: typeof fetch | undefined = globalThis.fetch): Promise<Ps4EyeEnsureResult | null> {
+  if (typeof fetchFn !== 'function') return null;
+  const controller = typeof AbortController === 'function' ? new AbortController() : null;
+  const timer = controller ? setTimeout(() => controller.abort(), 4500) : null;
+  try {
+    const res = await fetchFn('/api/ps4eye/ensure', {
+      method: 'POST',
+      cache: 'no-store',
+      signal: controller?.signal,
+    });
+    if (!res.ok) return null;
+    const data = await res.json() as Partial<Ps4EyeEnsureResult>;
+    if (!data || typeof data.ready !== 'boolean' || typeof data.state !== 'string') return null;
+    return {
+      state: data.state,
+      ready: data.ready,
+      initializedNow: Boolean(data.initializedNow),
+      message: typeof data.message === 'string' ? data.message : '',
+    };
+  } catch {
+    return null;
+  } finally {
+    if (timer !== null) clearTimeout(timer);
+  }
+}
 
 export function isWideStereoFrame(videoWidth: number, videoHeight: number): boolean {
   return Number.isFinite(videoWidth) && Number.isFinite(videoHeight) && videoWidth > 0 && videoHeight > 0 && videoWidth / videoHeight >= 2.6;

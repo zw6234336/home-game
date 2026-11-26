@@ -1,6 +1,14 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { CameraSession, isOv580StereoFrame, isWideStereoFrame, stereoCropPreset } from '../src/platform/camera.ts';
+import {
+  CameraSession,
+  ensureLocalPs4Camera,
+  isOv580StereoFrame,
+  isPs4CameraLabel,
+  isWideStereoFrame,
+  pickPreferredCameraId,
+  stereoCropPreset,
+} from '../src/platform/camera.ts';
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -109,4 +117,37 @@ test('stereoCropPreset extracts clean single-eye and zoomed windows for OV580 an
   assert.deepEqual(full, { x: 0, y: 0, width: 1, height: 1 });
   assert.deepEqual(stereoCropPreset(2560, 720, 'left'), { x: 0, y: 0, width: 0.5, height: 1 });
   assert.deepEqual(stereoCropPreset(2560, 720, 'right'), { x: 0.5, y: 0, width: 0.5, height: 1 });
+});
+
+test('PS4 camera label matching, preference selection, and backend ensure endpoint fallback', async () => {
+  assert.equal(isPs4CameraLabel('USB Camera-OV580'), true);
+  assert.equal(isPs4CameraLabel('PlayStation(R) Camera'), true);
+  assert.equal(isPs4CameraLabel('FaceTime高清相机'), false);
+
+  assert.equal(
+    pickPreferredCameraId([
+      { deviceId: 'facetime-1', label: 'FaceTime高清相机' },
+      { deviceId: 'ov580-1', label: 'USB Camera-OV580' },
+    ]),
+    'ov580-1',
+  );
+  assert.equal(pickPreferredCameraId([{ deviceId: 'facetime-1', label: 'FaceTime高清相机' }]), undefined);
+
+  const ok = await ensureLocalPs4Camera(async (input, init) => {
+    assert.equal(input, '/api/ps4eye/ensure');
+    assert.equal(init?.method, 'POST');
+    return {
+      ok: true,
+      async json() {
+        return { state: 'initialized', ready: true, initializedNow: true, message: 'ok' };
+      },
+    } as Response;
+  });
+  assert.deepEqual(ok, { state: 'initialized', ready: true, initializedNow: true, message: 'ok' });
+
+  const failedStatus = await ensureLocalPs4Camera(async () => ({ ok: false, async json() { return {}; } }) as Response);
+  assert.equal(failedStatus, null);
+
+  const threw = await ensureLocalPs4Camera(async () => { throw new Error('offline'); });
+  assert.equal(threw, null);
 });

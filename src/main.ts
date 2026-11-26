@@ -11,7 +11,8 @@ import { adventurePicture, adventureNote, decorateAdventureScreen } from './ui/a
 import { worldArt, mountArtwork } from './platform/world-art.ts';
 import { VisualMotion } from './platform/visual-motion.ts';
 import type { CropRect, HandObservation, Quality, ReachZone, TrackedPlayer, VisionFrame } from './types.ts';
-import { CameraSession, cameraError, isOv580StereoFrame, isWideStereoFrame, stereoCropPreset, type CropPreset } from './platform/camera.ts';
+import { CameraSession, cameraError, ensureLocalPs4Camera, isOv580StereoFrame, isWideStereoFrame, pickPreferredCameraId, settleCameraDelay, stereoCropPreset, type CropPreset } from './platform/camera.ts';
+import { exitSessionToHome } from './platform/session-lifecycle.ts';
 import { frameLoop, Sound, downloadDiagnostics } from './platform/runtime.ts';
 import { AnomalyLog } from './platform/anomaly-log.ts';
 import { gameArt } from './platform/game-art.ts';
@@ -103,7 +104,7 @@ const pipeline = new VisionPipeline({
   onStatus(status) { visionReady = status.state === 'ready'; setStatus(status.message); syncDevice(); },
   onError(error) { anomalyLog.record('vision_error', error.name || 'runtime', page, performance.now()); visionReady = false; setStatus('识别未就绪：' + error.message, true); if (page === 'game') pause('识别已中断，请重新连接并校准。'); },
   onFrame(frame) {
-    if (document.hidden || state.mode !== 'live') return;
+    if (document.hidden || state.mode !== 'live' || page === 'home' || !camera.active) return;
     const now = performance.now();
     if (now - frame.capturedAt > 150 || frame.capturedAt > now) {
       bodyNavigation.suspend();
@@ -188,7 +189,7 @@ const pipeline = new VisionPipeline({
       if (pauseGesture.update(menuPlayers, frame.capturedAt)) pause('歇一下，快乐不赶时间。');
     } else pauseGesture.reset();
     if (page !== 'game' || modal.open) {
-      const primary = modal.open ? dialogKind === 'pause' ? '#resume' : '[data-action="close-modal"].primary' : page === 'home' ? '#start' : page === 'device' ? '#device-next' : page === 'results' ? '#again' : '#start-round';
+      const primary = modal.open ? dialogKind === 'pause' ? '#resume' : '[data-action="close-modal"].primary' : page === 'device' ? '#device-next' : page === 'results' ? '#again' : '#start-round';
       const consumed = bodyNavigation.update(menuPlayers, frame, now, { context: page + '/' + dialogKind, primary, aspect: sourceAspect(), duo: state.players === 2, missing: primaryController.missing, members: freeTracker.isLocked ? '已绑定' + binding.boundCount + '人' + (binding.ignoredCount ? '，忽略旁观者' : '') : undefined, binding: !freeTracker.isLocked ? '先举一只手到肩膀上方，保持2秒绑定游玩伙伴（' + freeTracker.readyCount() + '/' + state.players + '）' : undefined });
       if (consumed) navigation.reset();
       else navigation.update(menuPlayers, frame, now, undefined, sourceAspect());
@@ -226,7 +227,7 @@ function setDisabled(id: string, value: boolean) { const el = document.getElemen
 function toast(text: string) { setText('toast', text); document.getElementById('toast')!.classList.add('show'); toastUntil = performance.now() + 4200; }
 function gestures() { bodyNavigation.hide(); document.querySelectorAll<HTMLButtonElement>('button[data-action]').forEach((el, index) => el.dataset.gestureId = page + '/' + dialogKind + '/' + el.dataset.action + '/' + index); }
 function setStatus(text: string, error = false) { statusMessage = text; statusError = error; setText('device-status', text); const el = document.getElementById('device-status'); if (el) el.dataset.error = String(error); }
-function closeDialog() { modal.close(); dialogKind = ''; navigation.reset(); gestures(); pipeline.setHands(page !== 'game' || state.game === 'bubbles' && state.fine); }
+function closeDialog() { modal.close(); dialogKind = ''; navigation.reset(); gestures(); if (page !== 'home' && camera.active) pipeline.setHands(page !== 'game' || state.game === 'bubbles' && state.fine); }
 function dialog(kind: string, html: string) {
   navigation.reset(); dialogKind = kind;
   const artwork = kind === 'help' ? '<div class="adventure-help">' + adventurePicture(state.game) + '</div>' : kind === 'pause' ? adventureNote(state.game, '休息一下，快乐不赶时间。') : '';
@@ -236,6 +237,11 @@ function dialog(kind: string, html: string) {
 }
 function show(next: Page) {
   closeDialog(); navigation.reset(); visualMotion.clear(); page = next; televisionSettings = false;
+  if (next === 'home') {
+    if (camera.active || visionReady || connecting || latest !== null || players.length > 0) stopCamera();
+    pose = null;
+    state.pose = null;
+  }
   void worldArt.preload(state.game);
   if (state.game === 'hearts') void gameArt.preload();
   if (page !== 'game') { field = null; hearts = null; gates = null; bridge = null; countdown = 0; }
@@ -260,9 +266,19 @@ function show(next: Page) {
     };
     canvas.addEventListener('pointermove', pointer); canvas.addEventListener('click', pointer);
   }
-  pipeline.setHands(page !== 'game' || state.game === 'bubbles' && state.fine);
+  if (page !== 'home' && camera.active) pipeline.setHands(page !== 'game' || state.game === 'bubbles' && state.fine);
   syncConnection();
-  if (page === 'device') { syncDevice(); if (camera.active) void listDevices(); }
+  if (page === 'device') {
+    syncDevice();
+    if (camera.active) void listDevices();
+    else {
+      void wakePs4Camera(false).then(result => {
+        if (page === 'device' && !camera.active && !connecting && result?.ready) {
+          setStatus('已自动检测到 PS4 体感摄像头（USB Camera-OV580），点击「连接摄像头」即可使用。');
+        }
+      });
+    }
+  }
   gestures();
 }
 function syncTelevision() {
@@ -312,13 +328,35 @@ async function listDevices() {
     select.value = camera.settings.deviceId ?? '';
   } catch { setStatus('无法列出摄像头，仍可使用已连接设备。'); }
 }
+async function wakePs4Camera(showStatus: boolean) {
+  const result = await ensureLocalPs4Camera();
+  if (result?.initializedNow) {
+    if (showStatus) setStatus('已自动唤醒 PS4 体感摄像头，正在等待系统就绪……');
+    await settleCameraDelay(450);
+  }
+  return result;
+}
 function clearTracking() { primaryController.reset(); motionContinuity.reset(); motion = { players: [], inferred: false, protected: true, recovered: false }; bodyNavigation.hide(); latest = null; players = []; trustedHands = []; freeTracker.reset(); stereoDepth.reset(); framing.reset(); navigation.reset(); calibrated = false; calibration = new Calibration(state.players); field?.clearTrails(); hearts?.clearTrails(); gates?.clearTrails(); bridge?.clearTrails(); pauseGesture.reset(); }
 async function connect(deviceId?: string) {
   const token = ++operation;
   connecting = true; pipeline.stop(); visionReady = false; clearTracking(); crop = { x: 0, y: 0, width: 1, height: 1 };
-  setStatus('请在浏览器允许摄像头访问……'); syncDevice();
+  setStatus(deviceId ? '请在浏览器允许摄像头访问……' : '正在自动检测并连接摄像头……'); syncDevice();
   try {
+    if (!deviceId) {
+      await wakePs4Camera(true);
+      if (token !== operation) return;
+      setStatus('请在浏览器允许摄像头访问……');
+    }
     if (!await camera.start(deviceId) || token !== operation) return;
+    if (!deviceId && !isOv580StereoFrame(camera.video.videoWidth, camera.video.videoHeight)) {
+      try {
+        const ps4Id = pickPreferredCameraId(await camera.devices());
+        if (ps4Id && ps4Id !== camera.settings.deviceId) {
+          if (!await camera.start(ps4Id) || token !== operation) return;
+        }
+      } catch {
+      }
+    }
     const stereoLayout = computeStereoLayout(camera.video.videoWidth, camera.video.videoHeight);
     if (isOv580StereoFrame(camera.video.videoWidth, camera.video.videoHeight)) {
       crop = stereoCropPreset(camera.video.videoWidth, camera.video.videoHeight, 'left');
@@ -364,7 +402,26 @@ async function startVision() {
   catch (error) { if (token === operation) setStatus('识别启动失败：' + cameraError(error), true); }
   finally { if (token === operation) { connecting = false; syncDevice(); } }
 }
-function stopCamera() { bodyNavigation.hide(); operation++; connecting = false; pipeline.stop(); camera.stop(); visionReady = false; clearTracking(); }
+function stopCamera() {
+  bodyNavigation.hide();
+  bodyNavigation.reset();
+  navigation.suspend();
+  visualMotion.suspend();
+  visualMotion.clear();
+  operation++;
+  connecting = false;
+  pipeline.stop();
+  camera.stop();
+  visionReady = false;
+  freeTracker = new FreeMotionTracker(state.players);
+  zones = [];
+  lostSince = 0;
+  demoCalibrate = 0;
+  statusMessage = '等待连接';
+  statusError = false;
+  metrics.reset();
+  clearTracking();
+}
 function enterCalibration(rebind = false) { if (rebind) { primaryController.reset(); freeTracker = new FreeMotionTracker(state.players); players = []; trustedHands = []; } motionContinuity.reset(); motion = { players: [], inferred: false, protected: true, recovered: false }; calibration = new Calibration(state.players); framing.reset(); calibrated = false; demoCalibrate = 0; syncSpaceMode(); show('calibration'); syncSpaceMode(); }
 function depthSummaryText() {
   const depths = players.map(player => player.depthMeters).filter((d): d is number => typeof d === 'number' && Number.isFinite(d));
@@ -503,7 +560,7 @@ function pause(reason: string) {
   const heartsMode = state.game === 'hearts';
   const gatesMode = state.game === 'gates';
   const bridgeMode = state.game === 'bridge';
-  dialog('pause', '<span class="pause-art" aria-hidden="true"><i></i><i></i></span><h2 id="pause-title">' + escapeHtml(reason) + '</h2><p>时间和得分都为你保留着。<span id="resume-hint"></span></p><button id="resume" class="button primary full" data-action="resume">' + (poses ? '继续我们的模仿秀' : heartsMode ? '继续接爱心' : gatesMode ? '继续穿越太空门' : bridgeMode ? '继续搭彩虹桥' : '继续拍泡泡') + '</button>' + (poses ? '<button id="skip-pose" class="button secondary full" data-action="skip-pose"' + (state.pose?.stage === 'celebrate' ? ' disabled' : '') + '>换个动作，不扣分</button>' : '') + '<button class="button secondary full" data-action="recalibrate">' + (poses ? '重新打招呼，开始新一局' : '重新确认伙伴') + '</button><button id="finish" class="button quiet full" data-action="finish" data-close-modal>结束这一局，看看成绩</button>');
+  dialog('pause', '<span class="pause-art" aria-hidden="true"><i></i><i></i></span><h2 id="pause-title">' + escapeHtml(reason) + '</h2><p>时间和得分都为你保留着。<span id="resume-hint"></span></p><button id="resume" class="button primary full" data-action="resume">' + (poses ? '继续我们的模仿秀' : heartsMode ? '继续接爱心' : gatesMode ? '继续穿越太空门' : bridgeMode ? '继续搭彩虹桥' : '继续拍泡泡') + '</button>' + (poses ? '<button id="skip-pose" class="button secondary full" data-action="skip-pose"' + (state.pose?.stage === 'celebrate' ? ' disabled' : '') + '>换个动作，不扣分</button>' : '') + '<button class="button secondary full" data-action="recalibrate">' + (poses ? '重新打招呼，开始新一局' : '重新确认伙伴') + '</button><button id="finish" class="button quiet full" data-action="finish" data-close-modal>结束这一局，看看成绩</button><button id="pause-home" class="button quiet full" data-action="home" data-close-modal>结束并返回大厅</button>');
 }
 function resume() {
   if (!readyToPlay(performance.now())) { toast('请让肩膀和小手入镜。换人或离开较久后，重新打个招呼。'); return; }
@@ -517,8 +574,21 @@ function diagnostics() {
   dialog('diagnostics', '<button class="dialog-close icon-button" data-action="close-modal" data-close-modal aria-label="关闭运行状态">×</button><span class="eyebrow">LOCAL PERFORMANCE</span><h2>看见每一次响应。</h2><div class="metric-grid" id="metrics"></div><p id="metrics-note"></p><p>统计仅包含有效帧，过期帧另计丢弃。物理端到端延迟待电视实测；低帧率时可在设备页切换质量档。</p><button class="button secondary full" data-action="export">导出诊断摘要</button><button class="button primary full" data-action="close-modal">回到游戏</button>');
 }
 function exitHome() {
-  if (page === 'game' && phase() !== 'results') { pause('这局还没结束，先歇一下。'); return; }
-  show('home');
+  exitSessionToHome({
+    hasActiveCapture: () => camera.active || visionReady || connecting,
+    endGameSession: () => {
+      pose = null;
+      state.pose = null;
+      state.round = pauseRound(state.round);
+    },
+    stopCameraAndVision: stopCamera,
+    resetModeToLive: () => { state.mode = 'live'; },
+    showHome: () => show('home'),
+    exitFullscreenIfActive: () => {
+      if (document.fullscreenElement) void exitTvFullscreen();
+    },
+    notifyCameraClosed: () => toast('已返回大厅，摄像头与识别已关闭。'),
+  });
 }
 
 async function action(name: string) {
@@ -623,6 +693,17 @@ document.addEventListener('keydown', event => {
   if (event.code === 'Space' && page === 'game') { event.preventDefault(); if (modal.open) resume(); else pause('歇一下，快乐不赶时间。'); }
 });
 modal.addEventListener('cancel', event => { event.preventDefault(); if (dialogKind === 'pause') resume(); else void action('close-modal'); });
+navigator.mediaDevices?.addEventListener?.('devicechange', () => {
+  if (page !== 'device') return;
+  void listDevices().then(async () => {
+    if (page !== 'device' || camera.active || connecting) return;
+    try {
+      const ps4Id = pickPreferredCameraId(await camera.devices());
+      if (ps4Id) setStatus('已自动检测到 PS4 体感摄像头（USB Camera-OV580），点击「连接摄像头」即可使用。');
+    } catch {
+    }
+  });
+});
 document.addEventListener('visibilitychange', () => { if (document.hidden) { visualMotion.suspend(); bodyNavigation.suspend(); motionContinuity.reset(); motion = { players: [], inferred: false, protected: true, recovered: false }; if (page === 'game') pause('切回画面后，我们再继续。'); latest = null; players = []; navigation.reset(); field?.clearTrails(); hearts?.clearTrails(); gates?.clearTrails(); bridge?.clearTrails(); } });
 document.addEventListener('fullscreenchange', () => {
   const wasFullscreen = nativeFullscreen;
